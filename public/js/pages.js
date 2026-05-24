@@ -1,3 +1,10 @@
+// ===== LISTEN FOR BALANCE UPDATES FROM OTHER SCRIPTS =====
+window.addEventListener('storage', function(e) {
+  if (e.key === 'userBalance' && e.newValue) {
+    window.updateBalanceDisplay(parseFloat(e.newValue));
+  }
+});
+
 // Add this near the top of page.js
 function maskEmail(email) {
   if (!email) return 'Unknown';
@@ -2076,3 +2083,152 @@ document.addEventListener('keydown', function(e) {
   }
 });
 
+// ===== ADD THIS NEW FUNCTION FOR BALANCE DISPLAY UPDATE =====
+window.updateBalanceDisplay = function(newBalance) {
+  if (newBalance === undefined || newBalance === null || isNaN(newBalance)) return;
+  
+  var balanceStr = '$' + parseFloat(newBalance).toFixed(2);
+  
+  // Update all possible balance display elements
+  var selectors = [
+    '.balance-amount', 
+    '#balanceDisplay', 
+    '#userBalance',
+    '#depositCurrentBalance',
+    '[data-balance]',
+    '.current-balance'
+  ];
+  
+  selectors.forEach(function(selector) {
+    var elements = document.querySelectorAll(selector);
+    elements.forEach(function(el) {
+      el.textContent = balanceStr;
+    });
+  });
+  
+  // Update localStorage if stored
+  try {
+    localStorage.setItem('userBalance', newBalance.toString());
+    sessionStorage.setItem('userBalance', newBalance.toString());
+  } catch(e) {}
+  
+  // Dispatch custom event so other scripts can react
+  try {
+    window.dispatchEvent(new CustomEvent('balanceUpdated', { detail: { balance: newBalance } }));
+  } catch(e) {}
+};
+
+// ===== REPLACE THE EXISTING executeBuyNumber FUNCTION =====
+window.executeBuyNumber = function() {
+  if (!window.selectedBuyService || !window.selectedBuyService.id) {
+    showToast('Please select a service.', 'error');
+    return;
+  }
+
+  if (!window.modalServiceAvailable) {
+    showToast('This service is not available for the selected country.', 'error');
+    var btn = document.getElementById('finalBuyBtn');
+    if (btn) { btn.innerHTML = '<i class="fas fa-phone-alt"></i> Get Number'; btn.disabled = false; }
+    return;
+  }
+
+  var serviceCode = window.selectedBuyService.id;
+  var serviceName = window.selectedBuyService.name;
+  var servicePrice = window.modalRealPrice;
+  var userEmail = (typeof getUserEmail === 'function') ? getUserEmail() : '';
+  
+  var countryDropdown = document.getElementById('countrySelect');
+  var countryCode = countryDropdown ? countryDropdown.value : 'us';
+  
+  var countryData = countries.find(function(c) { return c.code === countryCode; });
+  var countryFlag = countryData ? countryData.flag : '🏳️';
+  var countryName = countryData ? countryData.name : 'Unknown';
+  var serviceIcon = window.selectedBuyService.icon || '';
+
+  var btn = document.getElementById('finalBuyBtn');
+  if (btn) { btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Buying...'; btn.disabled = true; }
+
+  fetch('/api/numbers/request', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      email: userEmail,
+      serviceName: serviceName,
+      serviceId: serviceCode,
+      countryCode: countryCode,
+      countryFlag: countryFlag,
+      countryName: countryName,
+      serviceIcon: serviceIcon,
+      cost: servicePrice
+    })
+  })
+  .then(function(res) { 
+    if (!res.ok) {
+      return res.json().then(function(data) {
+        throw new Error(data.error || 'Request failed');
+      });
+    }
+    return res.json(); 
+  })
+  .then(function(data) {
+    if (data.error) {
+      showToast(data.error, 'error');
+    } else {
+      // ===== FIX: Update balance IMMEDIATELY from response =====
+      if (data.balance !== undefined) {
+        console.log('Balance deducted. New balance:', data.balance);
+        window.updateBalanceDisplay(data.balance);
+      } else {
+        console.warn('No balance returned in response:', data);
+      }
+      
+      showToast('Number purchased successfully! -' + servicePrice.toFixed(2), 'success');
+      closeBuyModal();
+      
+      // Also refresh balance from server as backup (after a short delay)
+      setTimeout(function() {
+        if (typeof loadBalance === 'function') {
+          loadBalance();
+        } else {
+          // If loadBalance doesn't exist, fetch it manually
+          var email = (typeof getUserEmail === 'function') ? getUserEmail() : '';
+          if (email) {
+            fetch('/api/user/' + email)
+              .then(function(res) { return res.json(); })
+              .then(function(userData) {
+                if (userData.balance !== undefined) {
+                  window.updateBalanceDisplay(userData.balance);
+                }
+              })
+              .catch(function(err) {
+                console.error('Failed to refresh balance:', err);
+              });
+          }
+        }
+      }, 500);
+      
+      // Load and render numbers
+      if (typeof loadNumbers === 'function') {
+        loadNumbers().then(function() {
+          if (typeof renderMainContent === 'function') renderMainContent();
+          setTimeout(function() {
+            var activeSection = document.getElementById('activeNumbersSection');
+            if (activeSection) {
+              activeSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+          }, 300);
+        });
+      }
+    }
+  })
+  .catch(function(err) {
+    console.error("Buy error:", err);
+    showToast('Failed to purchase: ' + err.message, 'error');
+  })
+  .finally(function() {
+    if (btn) {
+      btn.innerHTML = '<i class="fas fa-phone-alt"></i> Get Number';
+      btn.disabled = false;
+    }
+  });
+};
