@@ -1,3 +1,293 @@
+// ===== REPLACE THE EXISTING executeBuyNumber FUNCTION WITH THIS VERSION =====
+window.executeBuyNumber = function() {
+  if (!window.selectedBuyService || !window.selectedBuyService.id) {
+    showToast('Please select a service.', 'error');
+    return;
+  }
+
+  if (!window.modalServiceAvailable) {
+    showToast('This service is not available for the selected country.', 'error');
+    var btn = document.getElementById('finalBuyBtn');
+    if (btn) { btn.innerHTML = '<i class="fas fa-phone-alt"></i> Get Number'; btn.disabled = false; }
+    return;
+  }
+
+  var serviceCode = window.selectedBuyService.id;
+  var serviceName = window.selectedBuyService.name;
+  var servicePrice = window.modalRealPrice;
+  var userEmail = (typeof getUserEmail === 'function') ? getUserEmail() : '';
+  
+  var countryDropdown = document.getElementById('countrySelect');
+  var countryCode = countryDropdown ? countryDropdown.value : 'us';
+  
+  var countryData = countries.find(function(c) { return c.code === countryCode; });
+  var countryFlag = countryData ? countryData.flag : '🏳️';
+  var countryName = countryData ? countryData.name : 'Unknown';
+  var serviceIcon = window.selectedBuyService.icon || '';
+
+  var btn = document.getElementById('finalBuyBtn');
+  if (btn) { btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Checking balance...'; btn.disabled = true; }
+
+  // ===== FIX: Check balance BEFORE making API call =====
+  // First, get current balance from the displayed element or fetch it
+  var currentBalanceElement = document.querySelector('.balance-amount') || 
+                               document.getElementById('balanceDisplay') || 
+                               document.getElementById('userBalance') ||
+                               document.getElementById('depositCurrentBalance');
+  
+  var displayedBalance = 0;
+  if (currentBalanceElement) {
+    // Parse the balance from the display (remove $ and parse as float)
+    var balanceText = currentBalanceElement.textContent.replace(/[^0-9.-]/g, '');
+    displayedBalance = parseFloat(balanceText) || 0;
+  }
+
+  // Function to proceed with purchase after balance is confirmed
+  function proceedWithPurchase(confirmedBalance) {
+    // Check if balance is sufficient
+    if (confirmedBalance < servicePrice) {
+      var shortage = (servicePrice - confirmedBalance).toFixed(2);
+      
+      // Show detailed insufficient balance message
+      showToast('Insufficient balance! You need $' + servicePrice.toFixed(2) + ' but only have $' + confirmedBalance.toFixed(2) + '. Please deposit $' + shortage + ' more.', 'error');
+      
+      // Update button to show deposit option
+      if (btn) {
+        btn.innerHTML = '<i class="fas fa-plus-circle"></i> Deposit $' + shortage;
+        btn.disabled = false;
+        btn.onclick = function() {
+          closeBuyModal();
+          goToPage('deposit');
+        };
+      }
+      return;
+    }
+
+    // Balance is sufficient, proceed with purchase
+    if (btn) { btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Buying...'; }
+
+    fetch('/api/numbers/request', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: userEmail,
+        serviceName: serviceName,
+        serviceId: serviceCode,
+        countryCode: countryCode,
+        countryFlag: countryFlag,
+        countryName: countryName,
+        serviceIcon: serviceIcon,
+        cost: servicePrice
+      })
+    })
+    .then(function(res) { 
+      if (!res.ok) {
+        return res.json().then(function(data) {
+          throw new Error(data.error || 'Request failed');
+        });
+      }
+      return res.json(); 
+    })
+    .then(function(data) {
+      if (data.error) {
+        // Check if error is about insufficient balance
+        if (data.error.toLowerCase().includes('balance') || 
+            data.error.toLowerCase().includes('insufficient') ||
+            data.error.toLowerCase().includes('funds')) {
+          showToast('Insufficient balance! Please deposit funds before purchasing.', 'error');
+          if (btn) {
+            btn.innerHTML = '<i class="fas fa-plus-circle"></i> Deposit Funds';
+            btn.disabled = false;
+            btn.onclick = function() {
+              closeBuyModal();
+              goToPage('deposit');
+            };
+          }
+        } else {
+          showToast(data.error, 'error');
+          if (btn) {
+            btn.innerHTML = '<i class="fas fa-phone-alt"></i> Get Number';
+            btn.disabled = false;
+          }
+        }
+      } else {
+        // ===== FIX: Update balance IMMEDIATELY from response =====
+        if (data.balance !== undefined) {
+          console.log('Balance deducted. New balance:', data.balance);
+          window.updateBalanceDisplay(data.balance);
+          
+          // Show success message with cost
+          showToast('Number purchased! -$' + servicePrice.toFixed(2) + ' | New balance: $' + parseFloat(data.balance).toFixed(2), 'success');
+        } else {
+          showToast('Number purchased successfully!', 'success');
+        }
+        
+        closeBuyModal();
+        
+        // Refresh balance from server as backup (after a short delay)
+        setTimeout(function() {
+          if (typeof loadBalance === 'function') {
+            loadBalance();
+          } else {
+            var email = (typeof getUserEmail === 'function') ? getUserEmail() : '';
+            if (email) {
+              fetch('/api/user/' + email)
+                .then(function(res) { return res.json(); })
+                .then(function(userData) {
+                  if (userData.balance !== undefined) {
+                    window.updateBalanceDisplay(userData.balance);
+                  }
+                })
+                .catch(function(err) {
+                  console.error('Failed to refresh balance:', err);
+                });
+            }
+          }
+        }, 500);
+        
+        // Load and render numbers
+        if (typeof loadNumbers === 'function') {
+          loadNumbers().then(function() {
+            if (typeof renderMainContent === 'function') renderMainContent();
+            setTimeout(function() {
+              var activeSection = document.getElementById('activeNumbersSection');
+              if (activeSection) {
+                activeSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              }
+            }, 300);
+          });
+        }
+      }
+    })
+    .catch(function(err) {
+      console.error("Buy error:", err);
+      showToast('Failed to purchase: ' + err.message, 'error');
+      if (btn) {
+        btn.innerHTML = '<i class="fas fa-phone-alt"></i> Get Number';
+        btn.disabled = false;
+      }
+    });
+  }
+
+  // Fetch fresh balance from server to ensure accuracy
+  if (userEmail) {
+    fetch('/api/user/' + userEmail)
+      .then(function(res) { return res.json(); })
+      .then(function(userData) {
+        var serverBalance = parseFloat(userData.balance) || 0;
+        
+        // Update display with fresh balance
+        window.updateBalanceDisplay(serverBalance);
+        
+        // Proceed with purchase check
+        proceedWithPurchase(serverBalance);
+      })
+      .catch(function(err) {
+        console.error('Failed to fetch balance, using displayed value:', err);
+        // Fallback to displayed balance if server fetch fails
+        proceedWithPurchase(displayedBalance);
+      });
+  } else {
+    // No user email, use displayed balance
+    proceedWithPurchase(displayedBalance);
+  }
+};
+
+// ===== ADD THIS FUNCTION TO SHOW INSUFFICIENT BALANCE WARNING =====
+window.showInsufficientBalanceWarning = function(requiredAmount) {
+  // Create a modal overlay for insufficient balance
+  var overlay = document.createElement('div');
+  overlay.id = 'insufficientBalanceOverlay';
+  overlay.className = 'modal-overlay show';
+  overlay.style.zIndex = '10001';
+  overlay.onclick = function(e) {
+    if (e.target === overlay) {
+      overlay.remove();
+    }
+  };
+  
+  var currentBalance = 0;
+  var balanceEl = document.querySelector('.balance-amount') || 
+                  document.getElementById('balanceDisplay') || 
+                  document.getElementById('userBalance');
+  if (balanceEl) {
+    currentBalance = parseFloat(balanceEl.textContent.replace(/[^0-9.-]/g, '')) || 0;
+  }
+  
+  var shortage = (requiredAmount - currentBalance).toFixed(2);
+  
+  overlay.innerHTML = 
+    '<div class="modal" style="width:420px;max-width:90vw;text-align:center;">' +
+      '<div class="modal-body" style="padding:32px;">' +
+        '<div style="width:72px;height:72px;border-radius:50%;background:rgba(217,48,37,0.1);display:flex;align-items:center;justify-content:center;margin:0 auto 20px;">' +
+          '<i class="fas fa-wallet" style="font-size:32px;color:var(--danger);"></i>' +
+        '</div>' +
+        '<h2 style="font-size:20px;font-weight:700;margin-bottom:12px;color:var(--text-primary);">Insufficient Balance</h2>' +
+        '<p style="font-size:14px;color:var(--text-secondary);margin-bottom:8px;line-height:1.6;">You need <strong style="color:var(--danger);">$' + requiredAmount.toFixed(2) + '</strong> to get this number</p>' +
+        '<p style="font-size:14px;color:var(--text-secondary);margin-bottom:24px;line-height:1.6;">Current balance: <strong>$' + currentBalance.toFixed(2) + '</strong><br>Please deposit <strong style="color:var(--accent);">$' + shortage + '</strong> more</p>' +
+        '<div style="display:flex;gap:12px;justify-content:center;">' +
+          '<button class="btn btn-secondary" onclick="document.getElementById(\'insufficientBalanceOverlay\').remove()" style="min-width:120px;">Cancel</button>' +
+          '<button class="btn btn-primary" onclick="document.getElementById(\'insufficientBalanceOverlay\').remove();closeBuyModal();goToPage(\'deposit\');" style="min-width:160px;">' +
+            '<i class="fas fa-plus-circle"></i> Deposit $' + shortage +
+          '</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  
+  document.body.appendChild(overlay);
+};
+
+// ===== ADD LOW BALANCE INDICATOR IN THE NAV =====
+window.checkAndShowLowBalance = function() {
+  var balanceEl = document.querySelector('.balance-amount') || 
+                  document.getElementById('balanceDisplay') || 
+                  document.getElementById('userBalance');
+  
+  if (!balanceEl) return;
+  
+  var balance = parseFloat(balanceEl.textContent.replace(/[^0-9.-]/g, '')) || 0;
+  var badge = document.getElementById('lowBalanceIndicator');
+  
+  if (balance < 1) {
+    // Very low balance - show warning
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.id = 'lowBalanceIndicator';
+      badge.style.cssText = 'display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--danger);margin-left:6px;animation:pulse-dot 1.5s infinite;';
+      balanceEl.parentNode.appendChild(badge);
+    }
+    badge.style.background = 'var(--danger)';
+  } else if (balance < 5) {
+    // Low balance - show warning
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.id = 'lowBalanceIndicator';
+      badge.style.cssText = 'display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--warning);margin-left:6px;animation:pulse-dot 1.5s infinite;';
+      balanceEl.parentNode.appendChild(badge);
+    }
+    badge.style.background = 'var(--warning)';
+  } else {
+    // Sufficient balance - remove indicator
+    if (badge) {
+      badge.remove();
+    }
+  }
+};
+
+// Call this after balance updates
+var originalUpdateBalanceDisplay = window.updateBalanceDisplay;
+window.updateBalanceDisplay = function(newBalance) {
+  // Call original function
+  if (originalUpdateBalanceDisplay) {
+    originalUpdateBalanceDisplay(newBalance);
+  }
+  
+  // Check and show low balance indicator
+  setTimeout(function() {
+    window.checkAndShowLowBalance();
+  }, 100);
+};
+
 // ===== LISTEN FOR BALANCE UPDATES FROM OTHER SCRIPTS =====
 window.addEventListener('storage', function(e) {
   if (e.key === 'userBalance' && e.newValue) {

@@ -1182,3 +1182,46 @@ div[style*="repeat(auto-fit,minmax(150px"] > div > div:last-child {
   box-shadow: 0 2px 8px rgba(0,0,0,0.1);
   transition: box-shadow 0.2s ease;
 }
+
+/* ===== ADD TO YOUR CSS FILE ===== */
+
+/* Low balance pulse animation */
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.7); }
+}
+
+/* Balance warning styles */
+.balance-badge.low-balance {
+  border-color: var(--warning) !important;
+  background: rgba(212, 136, 6, 0.08) !important;
+}
+
+.balance-badge.critical-balance {
+  border-color: var(--danger) !important;
+  background: rgba(217, 48, 37, 0.08) !important;
+  animation: shake 0.5s ease-in-out;
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-3px); }
+  75% { transform: translateX(3px); }
+}
+
+/* Deposit button highlight in modal */
+.btn.deposit-cta {
+  background: linear-gradient(135deg, var(--warning), #e67700) !important;
+  color: white !important;
+  animation: glow 2s ease-in-out infinite;
+}
+
+@keyframes glow {
+  0%, 100% { box-shadow: 0 0 5px rgba(212, 136, 6, 0.3); }
+  50% { box-shadow: 0 0 20px rgba(212, 136, 6, 0.5); }
+}
+
+/* Insufficient balance modal enhancement */
+#insufficientBalanceOverlay .modal {
+  border: 2px solid var(--danger);
+}
