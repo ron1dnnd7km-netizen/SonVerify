@@ -1,3 +1,57 @@
+// =======================================================================
+// ===== SUPPRESS NON-CRITICAL ERRORS THAT BLOCK PAYMENTS =====
+// =======================================================================
+(function suppressNonCriticalErrors() {
+  // Suppress OneSignal errors
+  window.addEventListener('unhandledrejection', function(event) {
+    var reason = event.reason;
+    var msg = '';
+    
+    if (typeof reason === 'string') {
+      msg = reason;
+    } else if (reason && reason.message) {
+      msg = reason.message;
+    } else if (reason && reason.toString) {
+      msg = reason.toString();
+    }
+    
+    // OneSignal errors - non-critical
+    if (msg.indexOf('OneSignal') !== -1 || 
+        msg.indexOf('app ID does not match') !== -1 ||
+        msg.indexOf('onesignal') !== -1) {
+      event.preventDefault();
+      console.warn('[Suppressed] OneSignal:', msg);
+      return;
+    }
+    
+    // Push notification errors - non-critical
+    if (msg.indexOf('push') !== -1 && msg.indexOf('permission') !== -1) {
+      event.preventDefault();
+      console.warn('[Suppressed] Push:', msg);
+      return;
+    }
+    
+    // Service worker errors - non-critical
+    if (msg.indexOf('service-worker') !== -1 || msg.indexOf('Service Worker') !== -1) {
+      event.preventDefault();
+      console.warn('[Suppressed] SW:', msg);
+      return;
+    }
+  });
+  
+  // Also suppress in console.error to keep it clean
+  var origConsoleError = console.error;
+  console.error = function() {
+    var args = Array.prototype.slice.call(arguments);
+    var msg = args.join(' ');
+    if (msg.indexOf('OneSignal') !== -1 || 
+        msg.indexOf('app ID does not match') !== -1) {
+      return; // Don't log OneSignal noise
+    }
+    origConsoleError.apply(console, arguments);
+  };
+})();
+
 /* v2 - Ultra Complete Translation */
 window.currentPage = getPageFromHash() || 'numbers';
 if (!window.activeNumbers) window.activeNumbers = [];
@@ -6,6 +60,18 @@ if (!window.currentFilter) window.currentFilter = 'all';
 if (!window.refreshInterval) window.refreshInterval = null;
 if (!window.autoRefreshInterval) window.autoRefreshInterval = null;
 var _isTranslating = false;
+
+// ===== CACHING SYSTEM =====
+var _balanceCache = { value: 0, timestamp: 0, loading: false };
+var _numbersCache = { data: [], timestamp: 0, loading: false };
+var _historyCache = { data: [], timestamp: 0, loading: false };
+var _depositHistoryCache = { data: [], timestamp: 0, loading: false };
+var CACHE_TTL = 30000;
+
+window.invalidateBalanceCache = function() { _balanceCache.timestamp = 0; };
+window.invalidateNumbersCache = function() { _numbersCache.timestamp = 0; };
+window.invalidateHistoryCache = function() { _historyCache.timestamp = 0; };
+window.invalidateDepositHistoryCache = function() { _depositHistoryCache.timestamp = 0; };
 
 document.addEventListener('DOMContentLoaded', function() {
   initSidebar(); initNavigation(); initSearch(); initDropdowns(); initKeyboard();
@@ -20,7 +86,6 @@ function setupTranslationObserver() {
     var shouldTranslate = false;
     for (var i = 0; i < mutations.length; i++) {
       if (mutations[i].type === 'childList' && mutations[i].addedNodes.length > 0) { 
-        // Only translate if significant content was added
         for (var j = 0; j < mutations[i].addedNodes.length; j++) {
           var node = mutations[i].addedNodes[j];
           if (node.nodeType === 1 && node.tagName !== 'SCRIPT' && node.tagName !== 'STYLE') {
@@ -37,7 +102,7 @@ function setupTranslationObserver() {
         _isTranslating = true; 
         applyTranslations(); 
         _isTranslating = false; 
-      }, 50); // Increased delay for stability
+      }, 50);
     }
   });
   for (var i = 0; i < targets.length; i++) { 
@@ -77,7 +142,8 @@ function goToPage(page) {
   document.querySelectorAll('.nav-link').forEach(function(l) { l.classList.remove('active'); }); var btn = document.querySelector(".nav-link[data-page='" + page + "']"); if (btn) btn.classList.add('active');
   document.querySelectorAll('.menu-nav-btn').forEach(function(b) { b.classList.remove('active'); }); var mobileBtn = document.querySelector(".menu-nav-btn[data-page='" + page + "']"); if (mobileBtn) mobileBtn.classList.add('active');
   document.querySelectorAll('.dropdown-menu button[data-page]').forEach(function(b) { b.classList.remove('active-link'); }); var dropdownBtn = document.querySelector(".dropdown-menu button[data-page='" + page + "']"); if (dropdownBtn) dropdownBtn.classList.add('active-link');
-  Promise.resolve(preLoadPageData(page)).then(function() { renderMainContent(); });
+  renderMainContent();
+  preLoadPageData(page);
 }
 
 window.handleNav = function(page) { goToPage(page); };
@@ -96,7 +162,6 @@ function getPageFromHash() {
     'settings':'settings',
     'help':'help',
     'contacts':'contacts'
-    // Removed 'rent' and 'cards' references
   };
   return m[h] || h || 'numbers';
 }
@@ -106,9 +171,10 @@ function initNavigation() { document.querySelectorAll('.nav-link[data-page]').fo
 window.addEventListener('hashchange', function() { var page = getPageFromHash(); if (page !== window.currentPage) goToPage(page); });
 
 function preLoadPageData(page) {
-  if (page === 'history') return loadHistory();
-  else if (page === 'numbers') return loadNumbers();
-  else if (page === 'deposit') { var bp = loadBalance().then(function(b) { var el = document.getElementById('depositCurrentBalance'); if (el) el.textContent = '$' + b.toFixed(2); }); var hp = (typeof loadDepositHistory === 'function') ? loadDepositHistory() : Promise.resolve(); return Promise.all([bp, hp]); }
+  if (page === 'history') loadHistory();
+  else if (page === 'numbers') loadNumbers();
+  else if (page === 'deposit') { loadBalance(); if (typeof loadDepositHistory === 'function') loadDepositHistory(); }
+  else loadBalance();
   return Promise.resolve();
 }
 
@@ -138,7 +204,7 @@ async function checkExpiredNumbers() {
     totalSeconds--; var newTimeStr = String(Math.floor(totalSeconds/60)).padStart(2,'0') + ':' + String(totalSeconds%60).padStart(2,'0');
     if (timerEl) timerEl.textContent = newTimeStr; if (waitTimer) waitTimer.textContent = newTimeStr;
   });
-  if (changed) { await loadBalance(); await loadNumbers(); if (window.currentPage === 'numbers') renderMainContent(); }
+  if (changed) { window.invalidateBalanceCache(); window.invalidateNumbersCache(); await loadBalance(true); await loadNumbers(true); if (window.currentPage === 'numbers') renderMainContent(); }
 }
 
 function formatTime(seconds) { var m = Math.floor(seconds/60); var s = seconds%60; return String(m).padStart(2,'0')+':'+String(s).padStart(2,'0'); }
@@ -152,32 +218,50 @@ function showToast(message, type) {
   container.appendChild(toast); setTimeout(function() { if (toast.parentNode) toast.remove(); }, 3000);
 }
 
-function updateBalanceDisplay(amount) { var el = document.getElementById('balanceAmount'); if (el) el.textContent = '$' + amount.toFixed(2); }
+function updateBalanceDisplay(amount) { var el = document.getElementById('balanceAmount'); if (el) el.textContent = '$' + amount.toFixed(2); _balanceCache.value = amount; }
 window.syncBalance = updateBalanceDisplay;
 
-async function loadBalance() { if (typeof getUserEmail !== 'function') return 0; try { var r = await fetch('/api/user/' + getUserEmail()); if (!r.ok) throw new Error(); var d = await r.json(); updateBalanceDisplay(d.balance); return d.balance; } catch(e) { return 0; } }
-async function loadNumbers() { if (typeof getUserEmail !== 'function') { window.activeNumbers = []; return; } try { var r = await fetch('/api/numbers/' + getUserEmail()); if (!r.ok) throw new Error(); window.activeNumbers = await r.json(); } catch(e) { window.activeNumbers = []; } }
-async function loadHistory() { if (typeof getUserEmail !== 'function') { window.historyData = []; return; } try { var r = await fetch('/api/history/' + getUserEmail()); if (!r.ok) throw new Error(); window.historyData = await r.json(); } catch(e) { window.historyData = []; } }
+async function loadBalance(forceRefresh) {
+  if (typeof getUserEmail !== 'function') return _balanceCache.value;
+  var now = Date.now();
+  if (!forceRefresh && _balanceCache.timestamp && (now - _balanceCache.timestamp) < CACHE_TTL) { updateBalanceDisplay(_balanceCache.value); return _balanceCache.value; }
+  if (_balanceCache.loading) return new Promise(function(resolve) { var check = setInterval(function() { if (!_balanceCache.loading) { clearInterval(check); resolve(_balanceCache.value); } }, 50); });
+  _balanceCache.loading = true;
+  try { var r = await fetch('/api/user/' + getUserEmail()); if (!r.ok) throw new Error(); var d = await r.json(); _balanceCache.value = d.balance; _balanceCache.timestamp = now; updateBalanceDisplay(d.balance); return d.balance; } catch(e) { return _balanceCache.value; } finally { _balanceCache.loading = false; }
+}
+
+async function loadNumbers(forceRefresh) {
+  if (typeof getUserEmail !== 'function') { window.activeNumbers = []; return; }
+  var now = Date.now();
+  if (!forceRefresh && _numbersCache.timestamp && (now - _numbersCache.timestamp) < CACHE_TTL) { window.activeNumbers = _numbersCache.data; return; }
+  if (_numbersCache.loading) return;
+  _numbersCache.loading = true;
+  try { var r = await fetch('/api/numbers/' + getUserEmail()); if (!r.ok) throw new Error(); _numbersCache.data = await r.json(); _numbersCache.timestamp = now; window.activeNumbers = _numbersCache.data; } catch(e) { window.activeNumbers = _numbersCache.data || []; } finally { _numbersCache.loading = false; }
+}
+
+async function loadHistory(forceRefresh) {
+  if (typeof getUserEmail !== 'function') { window.historyData = []; return; }
+  var now = Date.now();
+  if (!forceRefresh && _historyCache.timestamp && (now - _historyCache.timestamp) < CACHE_TTL) { window.historyData = _historyCache.data; return; }
+  if (_historyCache.loading) return;
+  _historyCache.loading = true;
+  try { var r = await fetch('/api/history/' + getUserEmail()); if (!r.ok) throw new Error(); _historyCache.data = await r.json(); _historyCache.timestamp = now; window.historyData = _historyCache.data; } catch(e) { window.historyData = _historyCache.data || []; } finally { _historyCache.loading = false; }
+}
 
 function renderMainContent() {
   var main = document.getElementById('mainContent'); if (!main) return;
-  
-  // FIX: Always refresh balance when rendering any page
-  loadBalance().catch(function() {});
-  
   var page = window.currentPage; var functionName = 'render' + page.charAt(0).toUpperCase() + page.slice(1) + 'Page';
   if (typeof window[functionName] === 'function') { try { window[functionName](main); } catch(error) { main.innerHTML = '<div style="padding:20px;background:#ffebee;border:2px solid red;border-radius:12px;color:#c62828;">CRASH: '+error.message+'</div>'; } }
   else { main.innerHTML = '<div class="empty-state"><i class="fas fa-exclamation-triangle"></i><p>'+t('Page')+' "'+page+'" '+t('is missing')+'</p></div>'; }
-  if (page === 'deposit') { loadBalance().then(function(b) { var el = document.getElementById('depositCurrentBalance'); if (el) el.textContent = '$' + b.toFixed(2); }); if (typeof loadDepositHistory === 'function') loadDepositHistory(); }
-  // Increased delay to ensure DOM is ready
+  if (page === 'deposit') { var el = document.getElementById('depositCurrentBalance'); if (el) el.textContent = '$' + _balanceCache.value.toFixed(2); }
   setTimeout(function() { applyTranslations(); }, 100);
 }
 
 function copyNumber(phone) { navigator.clipboard.writeText(phone.replace(/\s/g,'')).then(function() { showToast(t('Number copied to clipboard'), 'success'); }).catch(function() { showToast(t('Copy failed'), 'error'); }); }
-async function cancelNumber(id) { if (!confirm(t('Are you sure you want to cancel this number?'))) return; try { var r = await fetch('/api/numbers/'+id, {method:'DELETE'}); if (!r.ok) throw new Error(); var d = await r.json(); if (d.error) { showToast(d.error, 'error'); return; } updateBalanceDisplay(d.balance); renderMainContent(); showToast(t('Number cancelled, balance refunded'), 'info'); } catch(e) { showToast(t('Error cancelling number'), 'error'); } }
+async function cancelNumber(id) { if (!confirm(t('Are you sure you want to cancel this number?'))) return; try { var r = await fetch('/api/numbers/'+id, {method:'DELETE'}); if (!r.ok) throw new Error(); var d = await r.json(); if (d.error) { showToast(d.error, 'error'); return; } window.invalidateBalanceCache(); updateBalanceDisplay(d.balance); renderMainContent(); showToast(t('Number cancelled, balance refunded'), 'info'); } catch(e) { showToast(t('Error cancelling number'), 'error'); } }
 async function refreshNumber(id) { try { var r = await fetch('/api/numbers/'+id+'/expire', {method:'POST'}); if (!r.ok) throw new Error(); renderMainContent(); showToast(t('Requesting new number...'), 'info'); } catch(e) { showToast(t('Error refreshing number'), 'error'); } }
 function setFilter(filter) { window.currentFilter = filter; renderMainContent(); }
-function refreshAllNumbers() { showToast(t('All numbers refreshed'), 'info'); renderMainContent(); }
+function refreshAllNumbers() { window.invalidateNumbersCache(); loadNumbers(true).then(function() { showToast(t('All numbers refreshed'), 'info'); renderMainContent(); }); }
 
 var depositPollingInterval = null;
 function checkDepositReturn() {
@@ -185,11 +269,9 @@ function checkDepositReturn() {
   var s = p.get('deposit');
   var ref = p.get('ref');
   
-  // Clean URL
   if (s) window.history.replaceState({}, '', window.location.pathname);
   
-  // Load initial data
-  Promise.all([loadBalance(), loadDepositHistory()]).then(function() {
+  Promise.all([loadBalance(true), (typeof loadDepositHistory === 'function' ? loadDepositHistory(true) : Promise.resolve())]).then(function() {
     if (s === 'success' && ref) {
       showToast(t('Payment submitted! Checking status...'), 'info');
       startDepositPollingByRef(ref);
@@ -198,7 +280,6 @@ function checkDepositReturn() {
     } else if (s === 'failed' || s === 'declined') {
       showToast(t('Payment failed.'), 'error');
     } else {
-      // Check for any pending deposits in history
       if (window.depositHistoryData && window.depositHistoryData.length > 0) {
         var pendingDep = window.depositHistoryData.find(function(d) { return d.status === 'pending'; });
         if (pendingDep && pendingDep.reference) {
@@ -228,18 +309,19 @@ function startDepositPollingByRef(reference) {
           showToast(t('Payment successful! Balance updated.'), 'success');
           stopDepositPolling();
           
-          // Keep refreshing balance for 2 minutes
+          window.invalidateBalanceCache();
+          window.invalidateDepositHistoryCache();
           balanceRetryCount = 0;
           (function keepRefreshingBalance() {
             balanceRetryCount++;
             if (balanceRetryCount > 24) return;
             setTimeout(function() {
-              loadBalance();
+              loadBalance(true);
               keepRefreshingBalance();
             }, 5000);
           })();
           
-          if (typeof loadDepositHistory === 'function') loadDepositHistory();
+          if (typeof loadDepositHistory === 'function') loadDepositHistory(true);
           if (window.currentPage === 'deposit') renderMainContent();
           return;
         }
@@ -249,7 +331,7 @@ function startDepositPollingByRef(reference) {
                     data.status === 'cancelled' ? t('Payment was cancelled.') : t('Payment failed.');
           showToast(msg, 'error');
           stopDepositPolling();
-          if (typeof loadDepositHistory === 'function') loadDepositHistory();
+          if (typeof loadDepositHistory === 'function') loadDepositHistory(true);
           if (window.currentPage === 'deposit') renderMainContent();
           return;
         }
@@ -288,7 +370,6 @@ function deleteAccount() { if (confirm(t('Are you sure you want to delete your a
 // ================================================================
 var translations = {
   en: {
-    // === NAVIGATION ===
     'Home':'Home','History':'History','Pricing':'Pricing','Help':'Help',
     'Settings':'Settings','Contacts':'Contacts','Add Funds':'Add Funds',
     'Logout':'Logout','Delete Account':'Delete Account',
@@ -296,13 +377,9 @@ var translations = {
     'Referral Program':'Referral Program','Help Center':'Help Center',
     'English':'English','Chinese':'中文','Russian':'Русский',
     'Search services...':'Search services...',
-
-    // === SIDEBAR ===
     'Recommended':'Recommended','Popular Services':'Popular Services',
     'Social Media':'Social Media','E-Commerce':'E-Commerce',
     'All Services':'All Services','numbers':'numbers',
-
-    // === MODAL ===
     'Get Virtual Number':'Get Virtual Number',
     'Service':'Service','Select a service...':'Select a service...',
     'Country / Region':'Country / Region','Select country...':'Select country...',
@@ -310,13 +387,9 @@ var translations = {
     'Tether - Lowest fees':'Tether - Lowest fees',
     'Enter service name (e.g., MyApp, CustomService)':'Enter service name (e.g., MyApp, CustomService)',
     'Cancel':'Cancel','Get Number':'Get Number','Close':'Close',
-
-    // === STATUSES ===
     'Active':'Active','Waiting':'Waiting','Expired':'Expired',
     'Received':'Received','Cancelled':'Cancelled','Failed':'Failed',
     'Pending':'Pending','Completed':'Completed','Timeout':'Timeout',
-
-    // === NUMBER ACTIONS ===
     'Copy':'Copy','Cancel Number':'Cancel Number',
     'Number copied to clipboard':'Number copied to clipboard',
     'Copy failed':'Copy failed',
@@ -328,23 +401,17 @@ var translations = {
     'Number expired':'Number expired',
     'Waiting for SMS':'Waiting for SMS','Time remaining':'Time remaining',
     'Refresh':'Refresh','Copy Number':'Copy Number',
-
-    // === EMPTY STATES ===
     'No active numbers':'No active numbers',
     'Your virtual numbers will appear here':'Your virtual numbers will appear here',
     'No history yet':'No history yet',
     'Your transaction history will appear here':'Your transaction history will appear here',
     'No deposit history':'No deposit history',
     'No results found':'No results found','Loading...':'Loading...',
-
-    // === HISTORY ===
     'All':'All','Filter':'Filter',
     'Date':'Date','Amount':'Amount','Status':'Status',
     'Number':'Number','Country':'Country',
     'Phone':'Phone','Code':'Code','Message':'Message',
     'SMS History':'SMS History',
-
-    // === DEPOSIT PAGE ===
     'Top Up Balance':'Top Up Balance',
     'USDT':'USDT','Bank Cards':'Bank Cards','Cryptocurrency':'Cryptocurrency',
     'USDT - TRC20':'USDT - TRC20',
@@ -362,8 +429,6 @@ var translations = {
     'Payment was cancelled.':'Payment was cancelled.',
     'Payment failed or cancelled.':'Payment failed or cancelled.',
     'Payment is still processing. It will update automatically.':'Payment is still processing. It will update automatically.',
-
-    // === REFERRAL PAGE ===
     'Recommend the service and earn money':'Recommend the service and earn money',
     'Share your referral link and earn 10% commission on every purchase':'Share your referral link and earn 10% commission on every purchase',
     'Read more...':'Read more...',
@@ -396,8 +461,6 @@ var translations = {
     'Share your link':'Share your link',
     'commission':'commission','purchase':'purchase',
     'earn 10%':'earn 10%','10% commission':'10% commission',
-
-    // === CONTACTS PAGE ===
     'Contact Us':'Contact Us','Get in Touch':'Get in Touch',
     'Send Message':'Send Message',
     'Subject':'Subject','Your message':'Your message',
@@ -408,8 +471,6 @@ var translations = {
     'Enter your name':'Enter your name',
     'Enter subject':'Enter subject',
     'Enter your email':'Enter your email',
-
-    // === HELP PAGE ===
     'FAQ':'FAQ','Frequently Asked Questions':'Frequently Asked Questions',
     'How it works':'How it works','Support':'Support',
     'User Guide':'User Guide',
@@ -492,14 +553,10 @@ var translations = {
     'Cancel and try another number':'Cancel and try another number',
     'Wait for the timer to expire':'Wait for the timer to expire',
     'The code will appear here automatically':'The code will appear here automatically',
-
-    // === SETTINGS ===
     'Profile':'Profile','Referral':'Referral',
     'Save':'Save','Submit':'Submit','Update':'Update',
     'Password':'Password','Change Password':'Change Password',
     'Confirm Password':'Confirm Password',
-
-    // === AUTH ===
     'Login':'Login','Sign Up':'Sign Up','Register':'Register',
     'Forgot Password?':'Forgot Password?',
     'Don\'t have an account?':'Don\'t have an account?',
@@ -514,8 +571,6 @@ var translations = {
     'Welcome back':'Welcome back','Create your account':'Create your account',
     'Enter your email':'Enter your email','Enter your password':'Enter your password',
     'Remember me':'Remember me',
-
-    // === GENERAL ===
     'Error':'Error','Success':'Success','Info':'Info',
     'Logging out...':'Logging out...',
     'Account deletion not implemented yet':'Account deletion not implemented yet',
@@ -984,7 +1039,6 @@ var translations = {
     'Nothing here yet':'Здесь пока пусто',
     'You have no items':'У вас нет элементов',
     'Rent Number': 'Аренда номера',
-    'Rent Number': 'Аренда номера',
     'Virtual Cards': 'Виртуальные карты',
     '租用号码': 'Аренда номера',
     '虚拟卡': 'Виртуальные карты',
@@ -1003,153 +1057,97 @@ function t(key) { return (translations[currentLang] && translations[currentLang]
 function changeLanguage(lang) {
   if (!langData[lang]) lang = 'en';
   var info = langData[lang];
-
-  // 1. Update flags
   var dFlag = document.getElementById('desktopLangFlag'); if (dFlag) dFlag.textContent = info.flag;
   var mFlag = document.getElementById('mobileLangFlag'); if (mFlag) mFlag.textContent = info.flag;
-
-  // 2. Close dropdowns
   closeDropdown('#desktopLangDrop');
   var mld = document.getElementById('mobileLangDrop'); if (mld) mld.classList.remove('show','open','active');
   var mlb = document.getElementById('mobileLangBtn'); if (mlb) mlb.classList.remove('open');
-
-  // 3. Set the new language IMMEDIATELY
   currentLang = lang;
   localStorage.setItem('language', lang);
-
-  // 4. Translate EVERYTHING immediately (before any re-renders)
   applyTranslations();
-
-  // 5. Re-render dynamic content (pages + sidebar)
   if (typeof renderSidebar === 'function') {
     var s = document.getElementById('serviceSearch');
     renderSidebar(s ? s.value : '');
   }
   renderMainContent();
-
-  // 6. Translate AGAIN after re-renders complete
-  setTimeout(function() {
-    applyTranslations();
-  }, 100);
-  
-  setTimeout(function() {
-    applyTranslations();
-  }, 300);
-  
+  setTimeout(function() { applyTranslations(); }, 100);
+  setTimeout(function() { applyTranslations(); }, 300);
   closeMobileSidebar();
 }
 
 function applyTranslations() {
   var tr = translations[currentLang];
   if (!tr) return;
-  
-  // Translate elements with data-i18n attributes (scan ENTIRE document)
   document.querySelectorAll('[data-i18n]').forEach(function(el) { 
     var k = el.getAttribute('data-i18n'); 
     if (tr[k] !== undefined) el.textContent = tr[k]; 
   });
-  
-  // Translate placeholders
   document.querySelectorAll('[data-i18n-placeholder]').forEach(function(el) { 
     var k = el.getAttribute('data-i18n-placeholder'); 
     if (tr[k] !== undefined) el.placeholder = tr[k]; 
   });
-  
-  // Translate titles
   document.querySelectorAll('[data-i18n-title]').forEach(function(el) { 
     var k = el.getAttribute('data-i18n-title'); 
     if (tr[k] !== undefined) el.title = tr[k]; 
   });
-  
-  // Translate select options
   document.querySelectorAll('select option:not([data-i18n])').forEach(function(opt) { 
     var txt = opt.textContent.trim(); 
     if (txt && tr[txt] !== undefined) opt.textContent = tr[txt]; 
   });
-  
-  // Scan ALL text nodes in the ENTIRE document (including sidebar)
   ultraScanTextNodes(tr);
 }
 
 function ultraScanTextNodes(tr) {
   var root = document.documentElement;
-  
   var sortedKeys = Object.keys(tr).filter(function(k) { return k.length >= 2; });
   sortedKeys.sort(function(a, b) { return b.length - a.length; });
-  
   var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
     acceptNode: function(node) {
       var parent = node.parentNode;
       if (!parent) return NodeFilter.FILTER_REJECT;
-      
       if (parent.closest && parent.closest('[data-notranslate]')) return NodeFilter.FILTER_REJECT;
-      
       var tag = parent.tagName;
       if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'NOSCRIPT') return NodeFilter.FILTER_REJECT;
       if (parent.hasAttribute && parent.hasAttribute('data-i18n')) return NodeFilter.FILTER_REJECT;
       if (!node.textContent || !node.textContent.trim()) return NodeFilter.FILTER_REJECT;
-      
       return NodeFilter.FILTER_ACCEPT;
     }
   });
-  
   var nodes = []; 
   var n; 
   while (n = walker.nextNode()) nodes.push(n);
-  
-  function hasCJK(str) {
-    return /[\u4e00-\u9fff\u3400-\u4dbf\u3000-\u303f\uff00-\uffef]/.test(str);
-  }
-  
+  function hasCJK(str) { return /[\u4e00-\u9fff\u3400-\u4dbf\u3000-\u303f\uff00-\uffef]/.test(str); }
   var cjkKeys = [];
   var nonCjkKeys = [];
   for (var k = 0; k < sortedKeys.length; k++) {
-    if (hasCJK(sortedKeys[k])) {
-      cjkKeys.push(sortedKeys[k]);
-    } else {
-      // CHANGED: Include all keys 2+ chars (was 3+)
-      nonCjkKeys.push(sortedKeys[k]);
-    }
+    if (hasCJK(sortedKeys[k])) { cjkKeys.push(sortedKeys[k]); }
+    else { nonCjkKeys.push(sortedKeys[k]); }
   }
-  
   for (var i = 0; i < nodes.length; i++) {
     var textNode = nodes[i]; 
     var original = textNode.textContent; 
     var result = original;
     var trimmed = original.trim();
-    
-    // EXACT MATCH FIRST
     if (tr[trimmed] !== undefined) {
       var prefix = original.substring(0, original.indexOf(trimmed));
       var suffix = original.substring(original.indexOf(trimmed) + trimmed.length);
       textNode.textContent = prefix + tr[trimmed] + suffix;
       continue;
     }
-    
     var isCJK = hasCJK(trimmed);
-    
     if (isCJK) {
       for (var j = 0; j < cjkKeys.length; j++) {
-        var key = cjkKeys[j]; 
-        var val = tr[key];
-        if (result.indexOf(key) !== -1) {
-          result = result.split(key).join(val);
-        }
+        var key = cjkKeys[j]; var val = tr[key];
+        if (result.indexOf(key) !== -1) { result = result.split(key).join(val); }
       }
     } else {
       for (var j = 0; j < nonCjkKeys.length; j++) {
-        var key = nonCjkKeys[j]; 
-        var val = tr[key];
-        
+        var key = nonCjkKeys[j]; var val = tr[key];
         var escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         var regex = new RegExp('\\b' + escaped + '\\b', 'gi');
-        
-        if (regex.test(result)) { 
-          result = result.replace(regex, val); 
-        }
+        if (regex.test(result)) { result = result.replace(regex, val); }
       }
     }
-    
     if (result !== original) textNode.textContent = result;
   }
 }
@@ -1157,7 +1155,7 @@ function ultraScanTextNodes(tr) {
 async function bootSequence() {
   if (typeof showApp === 'function') {
     var orig = showApp;
-    showApp = async function() { await orig(); await loadBalance(); await loadNumbers(); window.currentPage = getPageFromHash(); await preLoadPageData(window.currentPage); renderMainContent(); };
+    showApp = async function() { await orig(); await loadBalance(true); await loadNumbers(true); window.currentPage = getPageFromHash(); preLoadPageData(window.currentPage); renderMainContent(); };
   }
   if (typeof checkSession === 'function') checkSession();
   initTheme();

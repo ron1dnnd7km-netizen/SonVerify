@@ -1917,7 +1917,7 @@ function renderDepositPage(main) {
     '</div>' +
     '<div class="stat-card" style="padding:24px;min-height:180px;">' +
     '<div style="display:flex;align-items:center;gap:14px;margin-bottom:16px;"><div style="width:44px;height:44px;border-radius:14px;background:rgba(0,175,193,0.1);display:flex;align-items:center;justify-content:center;color:#00afc1;"><i class="fas fa-university" style="font-size:18px;"></i></div><div><div style="font-size:16px;font-weight:700;">Bank Transfer / Cards</div><div style="font-size:13px;color:var(--text-muted);">Confirmation: 1-5 minutes</div></div></div>' +
-    '<div style="font-size:13px;color:var(--text-secondary);line-height:1.7;">Pay via Bank Transfer, Mobile Money, Visa, or Mastercard for African currencies.</div>' +
+    '<div style="font-size:13px;color:var(--text-secondary);line-height:1.7;">Pay via Bank Transfer, Mobile Money, Visa, or Mastercard.</div>' +
     '<div style="margin-top:18px;"><button class="btn btn-outline dep-meth" data-method="stripe" onclick="selectPaymentMethod(\'stripe\', this)" style="width:100%;padding:12px;font-size:14px;">Select</button></div>' +
     '</div>' +
     '<div class="stat-card" style="padding:24px;min-height:180px;">' +
