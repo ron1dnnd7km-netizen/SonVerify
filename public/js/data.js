@@ -530,3 +530,466 @@ const countries = [
 window.activeNumbers = [];
 window.historyData = [];
 window.balance = 0.00;
+
+// =======================================================================
+// ===== SMS-BUS API: BUY, STATUS, CANCEL FUNCTIONS =====
+// =======================================================================
+
+// ✅ FIX: Use YOUR backend proxy instead of direct SMS-Bus calls
+// Your backend will forward these to sms-bus.com with the token
+var SMS_API_BUY = '/api/v2/buy';
+var SMS_API_STATUS = '/api/v2/status';
+var SMS_API_CANCEL = '/api/v2/cancel';
+var SMS_API_PRICES = '/api/v2/prices';
+
+// Token is now only used server-side - remove from frontend for security
+// var SMS_API_TOKEN = 'd4a7951968ed4e59a647a0ac1d1af637'; // ❌ REMOVE THIS - security risk!
+
+// ===== BUY A NUMBER =====
+function smsbusBuyNumber(countryId, serviceCode, userEmail) {
+  return fetch(SMS_API_BUY, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      country_id: countryId,
+      service_code: serviceCode,
+      email: userEmail
+    })
+  })
+  .then(function(res) { 
+    if (!res.ok) {
+      return res.json().then(function(err) {
+        throw new Error(err.error || err.msg || 'API Error: ' + res.status);
+      }).catch(function() {
+        throw new Error('Network error: ' + res.status);
+      });
+    }
+    return res.json(); 
+  })
+  .then(function(json) {
+    console.log('SMS-Bus buy response:', json);
+    
+    // Handle different response formats
+    var data = json.data || json;
+    var code = json.code;
+    
+    // Success codes: 200, 0, 1
+    if (code !== undefined && code !== 200 && code !== 0 && code !== 1) {
+      var errorMsg = json.msg || json.message || json.error || 'API Error: ' + code;
+      if (code === 400) errorMsg = 'Invalid request parameters';
+      if (code === 402) errorMsg = 'Insufficient funds on API account';
+      if (code === 404) errorMsg = 'Service or country not available';
+      if (code === 409) errorMsg = 'No numbers available, try again';
+      throw new Error(errorMsg);
+    }
+    
+    return data;
+  });
+}
+
+// ===== CHECK SMS STATUS =====
+function smsbusCheckStatus(activationId) {
+  return fetch(SMS_API_STATUS, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      id: activationId
+    })
+  })
+  .then(function(res) { 
+    if (!res.ok) throw new Error('Status check failed: ' + res.status);
+    return res.json(); 
+  })
+  .then(function(json) {
+    var data = json.data || json;
+    if (json.code !== undefined && json.code !== 200 && json.code !== 0) {
+      console.warn('Status check warning:', json.msg || json.message);
+    }
+    return data;
+  });
+}
+
+// ===== CANCEL ACTIVATION =====
+function smsbusCancelActivation(activationId) {
+  return fetch(SMS_API_CANCEL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      id: activationId
+    })
+  })
+  .then(function(res) { 
+    if (!res.ok) throw new Error('Cancel failed: ' + res.status);
+    return res.json(); 
+  })
+  .then(function(json) {
+    if (json.code !== undefined && json.code !== 200 && json.code !== 0) {
+      throw new Error(json.msg || json.message || 'Cancel failed');
+    }
+    return json.data || json;
+  });
+}
+
+// ===== FETCH PRICES FOR COUNTRY =====
+function fetchPricesForCountry(countryCode) {
+  var countryId = countryIdMap[countryCode];
+  if (!countryId) {
+    console.warn('No country ID for:', countryCode);
+    return Promise.resolve(null);
+  }
+  
+  // ✅ FIX: Call YOUR backend, not sms-bus.com directly
+  return fetch(SMS_API_PRICES + '?country_id=' + countryId)
+    .then(function(res) { 
+      if (!res.ok) throw new Error('Price fetch failed: ' + res.status);
+      return res.json(); 
+    })
+    .then(function(json) {
+      if (json.code !== undefined && json.code !== 200) {
+        console.error('Price API error:', json);
+        return null;
+      }
+      
+      var rawData = json.data || json;
+      var prices = {};
+      var rawPrices = {};
+      
+      // Handle both array and object formats
+      var items = Array.isArray(rawData) ? rawData : Object.values(rawData);
+      
+      for (var i = 0; i < items.length; i++) {
+        var item = items[i];
+        var projectCode = item.project_code || item.service_code || item.id;
+        rawPrices[projectCode] = item.cost || item.price || 0;
+        prices[projectCode] = addProfit(rawPrices[projectCode]);
+      }
+      
+      console.log('Prices for', countryCode, '- Raw:', rawPrices, '- With profit:', prices);
+      
+      priceCache[countryCode] = prices;
+      try { 
+        localStorage.setItem('priceCache', JSON.stringify(priceCache)); 
+        localStorage.setItem('priceCacheAge', Date.now().toString());
+      } catch(e) {}
+      
+      return prices;
+    })
+    .catch(function(e) { 
+      console.error('Price fetch failed:', countryCode, e); 
+      return null; 
+    });
+}
+
+// ===== GET SMS-BUS COUNTRY ID FROM CODE =====
+function getSmsBusCountryId(code) {
+  return countryIdMap[code] || null;
+}
+
+// ===== GET SMS-BUS SERVICE CODE (some services have different codes on API) =====
+var smsBusServiceCodeMap = {
+  'wa': 'wa',
+  'fb': 'fb',
+  'tg': 'tg',
+  'ig': 'ig',
+  'tk': 'tk',
+  'X': 'tw',
+  'twitter': 'tw',
+  'vk': 'vk',
+  'linkedin': 'li',
+  'snapchat': 'sc',
+  'tinder': 'td',
+  'bumble': 'bm',
+  'hinge': 'hg',
+  'google': 'go',
+  'apple': 'ap',
+  'microsoft': 'ms',
+  'amazon': 'az',
+  'steam': 'st',
+  'discord': 'dc',
+  'uber': 'ub',
+  'paypal': 'pp',
+  'netflix': 'nf',
+  'openai': 'ai',
+  'signal': 'sg',
+  'line': 'ln',
+  'viber': 'vb',
+  'telegram': 'tg',
+  'whatsapp': 'wa',
+  'facebook': 'fb',
+  'instagram': 'ig',
+  'tiktok': 'tk'
+};
+
+function getSmsBusServiceCode(serviceId) {
+  var id = (serviceId || '').toLowerCase().trim();
+  return smsBusServiceCodeMap[id] || id;
+}
+
+// ===== DEBUG: Test API connection =====
+window.testSmsBusApi = function() {
+  console.log('=== SMS-BUS API TEST ===');
+  console.log('Token:', SMS_API_TOKEN ? SMS_API_TOKEN.substring(0, 8) + '...' : 'NOT SET');
+  console.log('Base URL:', SMS_API_BASE);
+  console.log('Countries in map:', Object.keys(countryIdMap).length);
+  console.log('Services count:', services.length);
+  
+  // Test price fetch for US
+  var usId = countryIdMap['us'];
+  console.log('US Country ID:', usId);
+  
+  if (usId) {
+    fetchPricesForCountry('us').then(function(prices) {
+      console.log('US Prices fetched:', prices ? Object.keys(prices).length + ' services' : 'NULL');
+      console.log('Sample prices:', Object.entries(prices || {}).slice(0, 5));
+    });
+  }
+};
+
+window.testBuyNumber = function(serviceCode, countryCode) {
+  serviceCode = serviceCode || 'tg';
+  countryCode = countryCode || 'us';
+  
+  var countryId = getSmsBusCountryId(countryCode);
+  var apiServiceCode = getSmsBusServiceCode(serviceCode);
+  var email = (typeof getUserEmail === 'function') ? getUserEmail() : 'test@test.com';
+  
+  console.log('=== TEST BUY ===');
+  console.log('Service:', serviceCode, '→ API Code:', apiServiceCode);
+  console.log('Country:', countryCode, '→ ID:', countryId);
+  console.log('Email:', email);
+  
+  smsbusBuyNumber(countryId, apiServiceCode, email)
+    .then(function(data) {
+      console.log('Buy result:', data);
+      showToast('Test buy successful! ID: ' + (data.id || data.activation_id), 'success');
+    })
+    .catch(function(err) {
+      console.error('Buy error:', err);
+      showToast('Test buy failed: ' + err.message, 'error');
+    });
+};
+
+// =======================================================================
+// ===== SMS-BUS RENTAL API =====
+// =======================================================================
+
+var SMS_BUS_RENTAL_BASE = 'https://api.sms-bus.com';
+var rentalAreasCache = null;
+var rentalNumbersCache = null;
+
+/**
+ * Get available rental areas with prices
+ * Returns: [{ area_code, area_title, unit_price (cents), min_month, total }]
+ */
+async function fetchRentalAreas() {
+  if (rentalAreasCache) return rentalAreasCache;
+  
+  try {
+    var url = SMS_BUS_RENTAL_BASE + '/v1/rent/list/area?token=' + SMS_BUS_API_KEY;
+    var response = await fetch(url);
+    var data = await response.json();
+    
+    if (data.code === 200 && data.data) {
+      rentalAreasCache = data.data;
+      console.log('✅ Loaded', data.data.length, 'rental areas');
+      return data.data;
+    } else {
+      console.error('❌ Rental areas error:', data.message);
+      return [];
+    }
+  } catch (err) {
+    console.error('❌ Failed to fetch rental areas:', err.message);
+    return [];
+  }
+}
+
+/**
+ * Rent a number
+ * @param {string} areaCode - e.g., "US", "CA", "GB"
+ * @param {number} months - Rental period in months (minimum 1)
+ * @returns {object} - { order_id, mobile_number, dialing_code, area_code, expire_at, keep_at }
+ */
+async function rentNumber(areaCode, months) {
+  var url = SMS_BUS_RENTAL_BASE + '/v1/rent/get/number' +
+    '?token=' + SMS_BUS_API_KEY +
+    '&area_code=' + areaCode +
+    '&time=' + months;
+  
+  var response = await fetch(url);
+  var data = await response.json();
+  
+  if (data.code === 200 && data.data) {
+    return {
+      success: true,
+      orderId: data.data.order_id,
+      phoneNumber: data.data.mobile_number,
+      dialingCode: data.data.dialing_code,
+      areaCode: data.data.area_code,
+      expireAt: data.data.expire_at,
+      keepAt: data.data.keep_at
+    };
+  } else {
+    return {
+      success: false,
+      error: data.message || 'Failed to rent number',
+      errorCode: data.code
+    };
+  }
+}
+
+/**
+ * Renew a rented number
+ */
+async function renewRentalNumber(areaCode, mobileNumber, months) {
+  var url = SMS_BUS_RENTAL_BASE + '/v1/rent/renew/number' +
+    '?token=' + SMS_BUS_API_KEY +
+    '&area_code=' + areaCode +
+    '&mobile_number=' + mobileNumber +
+    '&time=' + months;
+  
+  var response = await fetch(url);
+  var data = await response.json();
+  
+  if (data.code === 200 && data.data) {
+    return {
+      success: true,
+      orderId: data.data.order_id,
+      expireAt: data.data.expire_at,
+      keepAt: data.data.keep_at
+    };
+  } else {
+    return {
+      success: false,
+      error: data.message || 'Failed to renew'
+    };
+  }
+}
+
+/**
+ * Cancel a rental order (within 20 min, no SMS received)
+ */
+async function cancelRentalOrder(orderId) {
+  var url = SMS_BUS_RENTAL_BASE + '/v1/rent/cancel/order' +
+    '?token=' + SMS_BUS_API_KEY +
+    '&order_id=' + orderId;
+  
+  var response = await fetch(url);
+  var data = await response.json();
+  
+  if (data.code === 200) {
+    return { success: true, message: 'Cancel successful' };
+  } else {
+    return {
+      success: false,
+      error: data.message || 'Failed to cancel',
+      errorCode: data.code
+    };
+  }
+}
+
+/**
+ * List rented numbers (active only by default)
+ */
+async function listRentedNumbers(onlyActive) {
+  if (typeof onlyActive === 'undefined') onlyActive = true;
+  
+  var url = SMS_BUS_RENTAL_BASE + '/v1/rent/list/number' +
+    '?token=' + SMS_BUS_API_KEY +
+    '&only_active=' + onlyActive +
+    '&page_size=100';
+  
+  var response = await fetch(url);
+  var data = await response.json();
+  
+  if (data.code === 200 && data.data) {
+    return data.data.list || [];
+  } else {
+    console.error('Failed to list rented numbers:', data.message);
+    return [];
+  }
+}
+
+/**
+ * Get latest SMS for a rented number
+ */
+async function getRentalLatestSms(areaCode, mobileNumber) {
+  var url = SMS_BUS_RENTAL_BASE + '/v1/rent/get/sms' +
+    '?token=' + SMS_BUS_API_KEY +
+    '&area_code=' + areaCode +
+    '&mobile_number=' + mobileNumber;
+  
+  var response = await fetch(url);
+  var data = await response.json();
+  
+  if (data.code === 200 && data.data) {
+    return {
+      success: true,
+      content: data.data.content,
+      receivedAt: data.data.receive_at
+    };
+  } else if (data.code === 404) {
+    return { success: false, error: 'No SMS yet' };
+  } else {
+    return { success: false, error: data.message };
+  }
+}
+
+/**
+ * List SMS history for a rented number
+ */
+async function listRentalSms(areaCode, mobileNumber) {
+  var url = SMS_BUS_RENTAL_BASE + '/v1/rent/list/sms' +
+    '?token=' + SMS_BUS_API_KEY +
+    '&area_code=' + areaCode +
+    '&mobile_number=' + mobileNumber +
+    '&page_size=50';
+  
+  var response = await fetch(url);
+  var data = await response.json();
+  
+  if (data.code === 200 && data.data) {
+    return data.data.list || [];
+  } else {
+    return [];
+  }
+}
+
+/**
+ * Convert area_code to country flag
+ */
+function getAreaFlag(areaCode) {
+  var flagMap = {
+    'US': '🇺🇸', 'CA': '🇨🇦', 'GB': '🇬🇧', 'UK': '🇬🇧',
+    'DE': '🇩🇪', 'FR': '🇫🇷', 'AU': '🇦🇺', 'RU': '🇷🇺',
+    'JP': '🇯🇵', 'KR': '🇰🇷', 'IN': '🇮🇳', 'BR': '🇧🇷',
+    'IT': '🇮🇹', 'ES': '🇪🇸', 'NL': '🇳🇱', 'PL': '🇵🇱',
+    'SE': '🇸🇪', 'NO': '🇳🇴', 'DK': '🇩🇰', 'FI': '🇫🇮',
+    'CH': '🇨🇭', 'AT': '🇦🇹', 'BE': '🇧🇪', 'IE': '🇮🇪',
+    'PT': '🇵🇹', 'CZ': '🇨🇿', 'RO': '🇷🇴', 'HU': '🇭🇺',
+    'UA': '🇺🇦', 'TR': '🇹🇷', 'SA': '🇸🇦', 'AE': '🇦🇪',
+    'ID': '🇮🇩', 'MY': '🇲🇾', 'PH': '🇵🇭', 'TH': '🇹🇭',
+    'VN': '🇻🇳', 'SG': '🇸🇬', 'MX': '🇲🇽', 'AR': '🇦🇷',
+    'CL': '🇨🇱', 'CO': '🇨🇴', 'PE': '🇵🇪', 'ZA': '🇿🇦',
+    'NG': '🇳🇬', 'KE': '🇰🇪', 'EG': '🇪🇬', 'IL': '🇮🇱'
+  };
+  return flagMap[areaCode] || '🌍';
+}
+
+/**
+ * Convert cents to dollars with your profit margin
+ */
+function rentalPriceWithProfit(cents) {
+  var basePrice = cents / 100;
+  return addProfit(basePrice);
+}
+
+// Make functions globally available
+window.fetchRentalAreas = fetchRentalAreas;
+window.rentNumber = rentNumber;
+window.renewRentalNumber = renewRentalNumber;
+window.cancelRentalOrder = cancelRentalOrder;
+window.listRentedNumbers = listRentedNumbers;
+window.getRentalLatestSms = getRentalLatestSms;
+window.listRentalSms = listRentalSms;
+window.getAreaFlag = getAreaFlag;
+window.rentalPriceWithProfit = rentalPriceWithProfit;

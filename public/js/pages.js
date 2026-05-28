@@ -194,27 +194,48 @@ window.executeBuyNumber = function() {
 };
 
 // ===== ADD THIS FUNCTION TO SHOW INSUFFICIENT BALANCE WARNING =====
-window.showInsufficientBalanceWarning = function(requiredAmount) {
-  // Create a modal overlay for insufficient balance
+window.showInsufficientBalanceWarning = function(requiredAmount, knownBalance) {
+  var currentBalance = knownBalance;
+  
+  // Only fall back to DOM if no balance passed
+  if (currentBalance === undefined || currentBalance === null) {
+    currentBalance = 0;
+    var balanceEl = document.querySelector('.balance-amount') || 
+                    document.getElementById('balanceDisplay') || 
+                    document.getElementById('userBalance');
+    if (balanceEl) {
+      currentBalance = parseFloat(balanceEl.textContent.replace(/[^0-9.-]/g, '')) || 0;
+    }
+  }
+  
+  // Extra safety: try all possible balance selectors
+  if (currentBalance <= 0) {
+    var selectors = [
+      '.balance-amount', '#balanceDisplay', '#userBalance',
+      '[data-balance]', '.nav-balance', '#navBalance',
+      '.wallet-balance'
+    ];
+    for (var i = 0; i < selectors.length; i++) {
+      var el = document.querySelector(selectors[i]);
+      if (el) {
+        var parsed = parseFloat(el.textContent.replace(/[^0-9.-]/g, ''));
+        if (!isNaN(parsed) && parsed > 0) {
+          currentBalance = parsed;
+          break;
+        }
+      }
+    }
+  }
+  
+  var shortage = Math.max(0, (requiredAmount - currentBalance)).toFixed(2);
+  
   var overlay = document.createElement('div');
   overlay.id = 'insufficientBalanceOverlay';
   overlay.className = 'modal-overlay show';
   overlay.style.zIndex = '10001';
   overlay.onclick = function(e) {
-    if (e.target === overlay) {
-      overlay.remove();
-    }
+    if (e.target === overlay) overlay.remove();
   };
-  
-  var currentBalance = 0;
-  var balanceEl = document.querySelector('.balance-amount') || 
-                  document.getElementById('balanceDisplay') || 
-                  document.getElementById('userBalance');
-  if (balanceEl) {
-    currentBalance = parseFloat(balanceEl.textContent.replace(/[^0-9.-]/g, '')) || 0;
-  }
-  
-  var shortage = (requiredAmount - currentBalance).toFixed(2);
   
   overlay.innerHTML = 
     '<div class="modal" style="width:420px;max-width:90vw;text-align:center;">' +
@@ -233,6 +254,10 @@ window.showInsufficientBalanceWarning = function(requiredAmount) {
         '</div>' +
       '</div>' +
     '</div>';
+  
+  // Remove any existing overlay first
+  var existing = document.getElementById('insufficientBalanceOverlay');
+  if (existing) existing.remove();
   
   document.body.appendChild(overlay);
 };
@@ -347,27 +372,51 @@ function fallbackCopy(text) {
   document.body.removeChild(ta);
 }
 
-// Cancel number
+// ===== REPLACE cancelNumber WITH THIS VERSION =====
 window.cancelNumber = function(id) {
   if (!confirm('Cancel this number and get a refund?')) return;
   
-  fetch('/api/numbers/' + id, { method: 'DELETE' })
-    .then(function(res) { return res.json(); })
+  var btn = event ? event.target : null;
+  if (btn) { btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>'; btn.disabled = true; }
+  
+  // First cancel on SMS-Bus
+  smsbusCancelActivation(id)
+    .then(function(cancelData) {
+      console.log('SMS-Bus cancel result:', cancelData);
+      
+      // Then cancel on your backend
+      return fetch('/api/numbers/' + id, { method: 'DELETE' })
+        .then(function(res) { return res.json(); });
+    })
     .then(function(data) {
-      if (data.error) {
+      if (data && data.error) {
         showToast(data.error, 'error');
       } else {
-        showToast(data.message || 'Cancelled!', 'success');
-        if (typeof loadBalance === 'function') loadBalance();
+        var refundAmount = (data && data.balance !== undefined) ? '' : '';
+        showToast('Number cancelled! Balance refunded.', 'success');
+        
+        if (data && data.balance !== undefined) {
+          window.updateBalanceDisplay(data.balance);
+        } else {
+          if (typeof loadBalance === 'function') loadBalance();
+        }
+        
         if (typeof loadNumbers === 'function') {
           loadNumbers().then(function() {
             if (typeof renderMainContent === 'function') renderMainContent();
           });
+        } else {
+          window.activeNumbers = window.activeNumbers.filter(function(n) { return n.id != id; });
+          if (typeof renderMainContent === 'function') renderMainContent();
         }
       }
     })
     .catch(function(err) {
-      showToast('Error: ' + err.message, 'error');
+      console.error('Cancel error:', err);
+      showToast('Error cancelling: ' + err.message, 'error');
+    })
+    .finally(function() {
+      if (btn) { btn.disabled = false; }
     });
 };
 
@@ -1176,6 +1225,100 @@ function renderActiveNumberCard(n) {
   '</div>';
 }
 
+// ===== REPLACE checkExpiredNumbers WITH THIS VERSION =====
+async function checkExpiredNumbers() {
+  if (!window.activeNumbers || window.activeNumbers.length === 0) return;
+  
+  var changed = false;
+  
+  for (var i = 0; i < window.activeNumbers.length; i++) {
+    var n = window.activeNumbers[i];
+    
+    // Skip non-waiting numbers (they enter grace period)
+    if (n.status !== 'waiting') continue;
+    
+    var timerEl = document.getElementById('timer-active-' + n.id);
+    if (!timerEl) continue;
+    
+    var timeStr = timerEl.textContent.trim();
+    var parts = timeStr.split(':');
+    var totalSeconds = (parseInt(parts[0], 10) || 0) * 60 + (parseInt(parts[1], 10) || 0);
+    
+    // Update timer display
+    if (totalSeconds > 0) {
+      totalSeconds--;
+      var newTimeStr = String(Math.floor(totalSeconds / 60)).padStart(2, '0') + ':' + String(totalSeconds % 60).padStart(2, '0');
+      timerEl.textContent = newTimeStr;
+    }
+    
+    // Check SMS-Bus status every 10 seconds (not every second to avoid rate limits)
+    if (totalSeconds % 10 === 0 || totalSeconds === 0) {
+      (function(number) {
+        smsbusCheckStatus(number.id)
+          .then(function(statusData) {
+            var smsStatus = (statusData.status || statusData.state || '').toLowerCase();
+            var smsCode = statusData.sms_code || statusData.code || '';
+            
+            if ((smsStatus === 'received' || smsStatus === 'ok' || smsStatus === 'success') && smsCode) {
+              // SMS RECEIVED!
+              number.status = 'received';
+              number.code = smsCode;
+              number.sms_text = statusData.sms_text || statusData.text || '';
+              changed = true;
+              
+              showToast('SMS received! Code: ' + smsCode, 'success');
+              
+              // Save to backend
+              fetch('/api/numbers/' + number.id + '/code', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ code: smsCode, smsText: number.sms_text })
+              }).catch(function() {});
+              
+              // Start grace period (4 min silent, then move to history)
+              if (typeof startGracePeriod === 'function') startGracePeriod(number.id);
+              
+              if (window.currentPage === 'numbers') renderMainContent();
+            } else if (smsStatus === 'canceled' || smsStatus === 'cancelled') {
+              number.status = 'expired';
+              changed = true;
+              showToast('Number was cancelled', 'error');
+              if (window.currentPage === 'numbers') renderMainContent();
+            } else if (totalSeconds <= 0) {
+              // Timer expired
+              number.status = 'expired';
+              changed = true;
+              showToast('Number expired', 'error');
+              
+              // Auto-cancel on SMS-Bus
+              smsbusCancelActivation(number.id).catch(function() {});
+              
+              // Auto-refund on backend
+              fetch('/api/numbers/' + number.id + '/expire', { method: 'POST' }).catch(function() {});
+              
+              if (typeof loadBalance === 'function') loadBalance();
+              if (window.currentPage === 'numbers') renderMainContent();
+            }
+          })
+          .catch(function(err) {
+            console.warn('Status check error for', number.id, ':', err.message);
+          });
+      })(n);
+    }
+    
+    // Handle local timer expiry
+    if (totalSeconds <= 0 && n.status === 'waiting') {
+      n.status = 'expired';
+      changed = true;
+      showToast('Number expired', 'error');
+      smsbusCancelActivation(n.id).catch(function() {});
+      fetch('/api/numbers/' + n.id + '/expire', { method: 'POST' }).catch(function() {});
+      if (typeof loadBalance === 'function') loadBalance();
+      if (window.currentPage === 'numbers') renderMainContent();
+    }
+  }
+}
+
 /* ===== DYNAMIC SERVICE GRID (Matches desktop sidebar data) ===== */
 function getDashboardServiceListHTML() {
   if (typeof services === 'undefined' || !services || services.length === 0) {
@@ -1404,11 +1547,11 @@ async function renderSettingsPage(main) {
   // Render HTML skeleton FIRST (with empty placeholders)
   main.innerHTML =
     '<div class="page-header"><h1 class="page-title">Referral Program</h1></div>' +
-    '<div style="max-width:980px;margin:0 auto;display:grid;gap:22px;">' +
+    '<div style="max-width:900px;margin:0 auto;display:grid;gap:22px;">' +
 
       // 1. INTRO
       '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:18px;padding:26px;box-shadow:var(--shadow-sm);">' +
-        '<h2 style="font-size:24px;font-weight:700;margin-bottom:10px;">Recommend the service and earn money</h2>' +
+        '<h2 style="font-size:24px;font-weight:500;margin-bottom:9px;">Recommend the service and earn money</h2>' +
         '<div id="refDescShort">' +
           '<p style="font-size:15px;color:var(--text-secondary);line-height:1.8;margin:0;">Share your referral link with friends and earn 10% of every purchase they make.</p>' +
         '</div>' +
@@ -1423,12 +1566,12 @@ async function renderSettingsPage(main) {
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:22px;">' +
         '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:18px;padding:24px;box-shadow:var(--shadow-sm);">' +
           '<div style="font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;font-weight:500;margin-bottom:8px;">Total Commissions</div>' +
-          '<div style="font-size:32px;font-weight:800;color:var(--accent);margin-bottom:4px;" id="refTotalCommissions">$0.00</div>' +
+          '<div style="font-size:21px;font-weight:450;color:var(--accent);margin-bottom:4px;" id="refTotalCommissions">$0.00</div>' +
           '<div style="font-size:13px;color:var(--text-secondary);">Lifetime earnings</div>' +
         '</div>' +
-        '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:18px;padding:24px;box-shadow:var(--shadow-sm);">' +
+        '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:23px;box-shadow:var(--shadow-sm);">' +
           '<div style="font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;font-weight:500;margin-bottom:8px;">Referral Count</div>' +
-          '<div style="font-size:32px;font-weight:800;color:var(--text-primary);margin-bottom:4px;" id="refCount">0</div>' +
+          '<div style="font-size:21px;font-weight:450;color:var(--text-primary);margin-bottom:4px;" id="refCount">0</div>' +
           '<div style="font-size:13px;color:var(--text-secondary);">Total friends invited</div>' +
         '</div>' +
       '</div>' +
@@ -2280,9 +2423,10 @@ window.updateModalPrice = function() {
   }
 };
 
+// ===== REPLACE THE ENTIRE executeBuyNumber FUNCTION =====
 window.executeBuyNumber = function() {
-  if (!window.selectedBuyService || !window.selectedBuyService.id) {
-    showToast('Please select a service.', 'error');
+  if (serverBalance < servicePrice) {
+  showInsufficientBalanceWarning(servicePrice, serverBalance);
     return;
   }
 
@@ -2307,218 +2451,158 @@ window.executeBuyNumber = function() {
   var serviceIcon = window.selectedBuyService.icon || '';
 
   var btn = document.getElementById('finalBuyBtn');
-  if (btn) { btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Buying...'; btn.disabled = true; }
+  if (btn) { btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Checking balance...'; btn.disabled = true; }
 
-  fetch('/api/numbers/request', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      email: userEmail,
-      serviceName: serviceName,
-      serviceId: serviceCode,
-      countryCode: countryCode,
-      countryFlag: countryFlag,
-      countryName: countryName,
-      serviceIcon: serviceIcon,
-      cost: servicePrice
-    })
-  })
-  .then(function(res) { return res.json(); })
-  .then(function(data) {
-    if (data.error) {
-      showToast(data.error, 'error');
-    } else {
-      showToast('Number purchased successfully!', 'success');
-      closeBuyModal();
-      if (typeof loadBalance === 'function') loadBalance();
-      if (typeof loadNumbers === 'function') {
-        loadNumbers().then(function() {
-          if (typeof renderMainContent === 'function') renderMainContent();
-          setTimeout(function() {
-            var activeSection = document.getElementById('activeNumbersSection');
-            if (activeSection) {
-              activeSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            }
-          }, 300);
-        });
-      }
-    }
-  })
-  .catch(function(err) {
-    console.error("Buy error:", err);
-    showToast('Failed to connect to server.', 'error');
-  })
-  .finally(function() {
-    if (btn) {
-      btn.innerHTML = '<i class="fas fa-phone-alt"></i> Get Number';
-      btn.disabled = false;
-    }
-  });
-};
-
-// Add a hidden debug button (press Ctrl+Shift+D to show)
-document.addEventListener('keydown', function(e) {
-  if (e.ctrlKey && e.shiftKey && e.key === 'D') {
-    var btn = document.getElementById('debugClearCache');
-    if (btn) {
-      btn.style.display = btn.style.display === 'none' ? 'block' : 'none';
-    } else {
-      var debugDiv = document.createElement('div');
-      debugDiv.id = 'debugClearCache';
-      debugDiv.style.cssText = 'position:fixed;bottom:20px;right:20px;z-index:99999;background:#1a1a2e;padding:15px;border-radius:10px;border:1px solid #333;';
-      debugDiv.innerHTML = '<button onclick="clearAllPriceCache()" style="background:#e74c3c;color:white;border:none;padding:10px 20px;border-radius:5px;cursor:pointer;font-size:14px;">Clear Price Cache</button><br><br>' +
-        '<button onclick="debugPrice(\'tg\',\'gb\')" style="background:#3498db;color:white;border:none;padding:10px 20px;border-radius:5px;cursor:pointer;font-size:14px;">Debug UK Telegram</button>';
-      document.body.appendChild(debugDiv);
-    }
-  }
-});
-
-// ===== ADD THIS NEW FUNCTION FOR BALANCE DISPLAY UPDATE =====
-window.updateBalanceDisplay = function(newBalance) {
-  if (newBalance === undefined || newBalance === null || isNaN(newBalance)) return;
-  
-  var balanceStr = '$' + parseFloat(newBalance).toFixed(2);
-  
-  // Update all possible balance display elements
-  var selectors = [
-    '.balance-amount', 
-    '#balanceDisplay', 
-    '#userBalance',
-    '#depositCurrentBalance',
-    '[data-balance]',
-    '.current-balance'
-  ];
-  
-  selectors.forEach(function(selector) {
-    var elements = document.querySelectorAll(selector);
-    elements.forEach(function(el) {
-      el.textContent = balanceStr;
-    });
-  });
-  
-  // Update localStorage if stored
-  try {
-    localStorage.setItem('userBalance', newBalance.toString());
-    sessionStorage.setItem('userBalance', newBalance.toString());
-  } catch(e) {}
-  
-  // Dispatch custom event so other scripts can react
-  try {
-    window.dispatchEvent(new CustomEvent('balanceUpdated', { detail: { balance: newBalance } }));
-  } catch(e) {}
-};
-
-// ===== REPLACE THE EXISTING executeBuyNumber FUNCTION =====
-window.executeBuyNumber = function() {
-  if (!window.selectedBuyService || !window.selectedBuyService.id) {
-    showToast('Please select a service.', 'error');
-    return;
-  }
-
-  if (!window.modalServiceAvailable) {
-    showToast('This service is not available for the selected country.', 'error');
-    var btn = document.getElementById('finalBuyBtn');
-    if (btn) { btn.innerHTML = '<i class="fas fa-phone-alt"></i> Get Number'; btn.disabled = false; }
-    return;
-  }
-
-  var serviceCode = window.selectedBuyService.id;
-  var serviceName = window.selectedBuyService.name;
-  var servicePrice = window.modalRealPrice;
-  var userEmail = (typeof getUserEmail === 'function') ? getUserEmail() : '';
-  
-  var countryDropdown = document.getElementById('countrySelect');
-  var countryCode = countryDropdown ? countryDropdown.value : 'us';
-  
-  var countryData = countries.find(function(c) { return c.code === countryCode; });
-  var countryFlag = countryData ? countryData.flag : '🏳️';
-  var countryName = countryData ? countryData.name : 'Unknown';
-  var serviceIcon = window.selectedBuyService.icon || '';
-
-  var btn = document.getElementById('finalBuyBtn');
-  if (btn) { btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Buying...'; btn.disabled = true; }
-
-  fetch('/api/numbers/request', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      email: userEmail,
-      serviceName: serviceName,
-      serviceId: serviceCode,
-      countryCode: countryCode,
-      countryFlag: countryFlag,
-      countryName: countryName,
-      serviceIcon: serviceIcon,
-      cost: servicePrice
-    })
-  })
-  .then(function(res) { 
-    if (!res.ok) {
-      return res.json().then(function(data) {
-        throw new Error(data.error || 'Request failed');
-      });
-    }
-    return res.json(); 
-  })
-  .then(function(data) {
-    if (data.error) {
-      showToast(data.error, 'error');
-    } else {
-      // ===== FIX: Update balance IMMEDIATELY from response =====
-      if (data.balance !== undefined) {
-        console.log('Balance deducted. New balance:', data.balance);
-        window.updateBalanceDisplay(data.balance);
-      } else {
-        console.warn('No balance returned in response:', data);
-      }
-      
-      showToast('Number purchased successfully! -' + servicePrice.toFixed(2), 'success');
-      closeBuyModal();
-      
-      // Also refresh balance from server as backup (after a short delay)
-      setTimeout(function() {
-        if (typeof loadBalance === 'function') {
-          loadBalance();
-        } else {
-          // If loadBalance doesn't exist, fetch it manually
-          var email = (typeof getUserEmail === 'function') ? getUserEmail() : '';
-          if (email) {
-            fetch('/api/user/' + email)
-              .then(function(res) { return res.json(); })
-              .then(function(userData) {
-                if (userData.balance !== undefined) {
-                  window.updateBalanceDisplay(userData.balance);
-                }
-              })
-              .catch(function(err) {
-                console.error('Failed to refresh balance:', err);
-              });
+  // ===== CHECK BALANCE FIRST =====
+  if (userEmail) {
+    fetch('/api/user/' + userEmail)
+      .then(function(res) { return res.json(); })
+      .then(function(userData) {
+        var serverBalance = parseFloat(userData.balance) || 0;
+        window.updateBalanceDisplay(serverBalance);
+        
+        if (serverBalance < servicePrice) {
+          var shortage = (servicePrice - serverBalance).toFixed(2);
+          showToast('Insufficient balance! Need $' + servicePrice.toFixed(2) + ', have $' + serverBalance.toFixed(2) + '. Deposit $' + shortage + ' more.', 'error');
+          if (btn) {
+            btn.innerHTML = '<i class="fas fa-plus-circle"></i> Deposit $' + shortage;
+            btn.disabled = false;
+            btn.onclick = function() { closeBuyModal(); goToPage('deposit'); };
           }
+          return;
         }
-      }, 500);
-      
-      // Load and render numbers
-      if (typeof loadNumbers === 'function') {
-        loadNumbers().then(function() {
+        
+        proceedWithSmsBusPurchase();
+      })
+      .catch(function(err) {
+        console.error('Balance check failed:', err);
+        proceedWithSmsBusPurchase();
+      });
+  } else {
+    proceedWithSmsBusPurchase();
+  }
+  
+  function proceedWithSmsBusPurchase() {
+    if (btn) { btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Getting number...'; }
+    
+    // Get SMS-Bus country ID
+    var smsBusCountryId = getSmsBusCountryId(countryCode);
+    var smsBusServiceCode = getSmsBusServiceCode(serviceCode);
+    
+    if (!smsBusCountryId) {
+      showToast('Country not supported on API. Code: ' + countryCode, 'error');
+      if (btn) { btn.innerHTML = '<i class="fas fa-phone-alt"></i> Get Number'; btn.disabled = false; }
+      return;
+    }
+    
+    console.log('Buying from SMS-Bus:', {
+      countryId: smsBusCountryId,
+      serviceCode: smsBusServiceCode,
+      email: userEmail,
+      cost: servicePrice
+    });
+    
+    // Call SMS-Bus API directly
+    smsbusBuyNumber(smsBusCountryId, smsBusServiceCode, userEmail)
+      .then(function(apiData) {
+        // SMS-Bus returns: { id, phone, status, ... }
+        var activationId = apiData.id || apiData.activation_id || apiData.order_id;
+        var phoneNumber = apiData.phone || apiData.number || apiData.phone_number || '';
+        
+        if (!activationId || !phoneNumber) {
+          throw new Error('Invalid response from SMS-Bus: missing ID or phone number');
+        }
+        
+        // Save to YOUR backend for tracking
+        return fetch('/api/numbers/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: userEmail,
+            activationId: activationId,
+            phone: phoneNumber,
+            serviceName: serviceName,
+            serviceId: serviceCode,
+            serviceIcon: serviceIcon,
+            countryCode: countryCode,
+            countryFlag: countryFlag,
+            countryName: countryName,
+            cost: servicePrice,
+            status: 'waiting',
+            createdAt: new Date().toISOString(),
+            totalTime: 300
+          })
+        }).then(function(res) { return res.json(); })
+          .then(function(saveData) {
+            // Return combined data
+            return {
+              id: activationId,
+              phone: phoneNumber,
+              balance: saveData.balance,
+              saved: true
+            };
+          });
+      })
+      .then(function(result) {
+        // Update balance from backend
+        if (result.balance !== undefined) {
+          window.updateBalanceDisplay(result.balance);
+        } else {
+          // Fallback: fetch fresh balance
+          if (typeof loadBalance === 'function') loadBalance();
+        }
+        
+        showToast('Number purchased: ' + result.phone + ' | -$' + servicePrice.toFixed(2), 'success');
+        closeBuyModal();
+        
+        // Reload numbers and render
+        if (typeof loadNumbers === 'function') {
+          loadNumbers().then(function() {
+            if (typeof renderMainContent === 'function') renderMainContent();
+            setTimeout(function() {
+              var activeSection = document.getElementById('activeNumbersSection');
+              if (activeSection) activeSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }, 300);
+          });
+        } else {
+          // Directly add to active numbers for immediate display
+          window.activeNumbers.unshift({
+            id: result.id,
+            phone: result.phone,
+            service_name: serviceName,
+            service_id: serviceCode,
+            service_icon: serviceIcon,
+            country_code: countryCode,
+            countryFlag: countryFlag,
+            status: 'waiting',
+            code: null,
+            cost: servicePrice,
+            created_at: new Date().toISOString(),
+            total_time: 300,
+            time_left: 300
+          });
           if (typeof renderMainContent === 'function') renderMainContent();
-          setTimeout(function() {
-            var activeSection = document.getElementById('activeNumbersSection');
-            if (activeSection) {
-              activeSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            }
-          }, 300);
-        });
-      }
-    }
-  })
-  .catch(function(err) {
-    console.error("Buy error:", err);
-    showToast('Failed to purchase: ' + err.message, 'error');
-  })
-  .finally(function() {
-    if (btn) {
-      btn.innerHTML = '<i class="fas fa-phone-alt"></i> Get Number';
-      btn.disabled = false;
-    }
-  });
+        }
+      })
+      .catch(function(err) {
+        console.error('Buy error:', err);
+        
+        var errorMsg = err.message || 'Failed to get number';
+        if (errorMsg.includes('409') || errorMsg.toLowerCase().includes('no numbers') || errorMsg.toLowerCase().includes('available')) {
+          errorMsg = 'No numbers available for this service/country. Try a different country or try again in a moment.';
+        } else if (errorMsg.includes('402') || errorMsg.toLowerCase().includes('insufficient')) {
+          errorMsg = 'API balance too low. Please contact support.';
+        } else if (errorMsg.includes('404')) {
+          errorMsg = 'Service not available for selected country.';
+        }
+        
+        showToast(errorMsg, 'error');
+      })
+      .finally(function() {
+        if (btn) {
+          btn.innerHTML = '<i class="fas fa-phone-alt"></i> Get Number';
+          btn.disabled = false;
+        }
+      });
+  }
 };

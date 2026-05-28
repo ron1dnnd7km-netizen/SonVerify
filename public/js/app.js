@@ -1,5 +1,5 @@
 /* v2 - Ultra Complete Translation */
- window.currentPage = getPageFromHash() || 'numbers';
+window.currentPage = getPageFromHash() || 'numbers';
 if (!window.activeNumbers) window.activeNumbers = [];
 if (!window.historyData) window.historyData = [];
 if (!window.currentFilter) window.currentFilter = 'all';
@@ -19,12 +19,30 @@ function setupTranslationObserver() {
     if (_isTranslating) return;
     var shouldTranslate = false;
     for (var i = 0; i < mutations.length; i++) {
-      if (mutations[i].type === 'childList' && mutations[i].addedNodes.length > 0) { shouldTranslate = true; break; }
-      if (mutations[i].type === 'characterData') { shouldTranslate = true; break; }
+      if (mutations[i].type === 'childList' && mutations[i].addedNodes.length > 0) { 
+        // Only translate if significant content was added
+        for (var j = 0; j < mutations[i].addedNodes.length; j++) {
+          var node = mutations[i].addedNodes[j];
+          if (node.nodeType === 1 && node.tagName !== 'SCRIPT' && node.tagName !== 'STYLE') {
+            shouldTranslate = true;
+            break;
+          }
+        }
+        if (shouldTranslate) break;
+      }
     }
-    if (shouldTranslate) { clearTimeout(window._translateTimeout); window._translateTimeout = setTimeout(function() { _isTranslating = true; applyTranslations(); _isTranslating = false; }, 20); }
+    if (shouldTranslate) { 
+      clearTimeout(window._translateTimeout); 
+      window._translateTimeout = setTimeout(function() { 
+        _isTranslating = true; 
+        applyTranslations(); 
+        _isTranslating = false; 
+      }, 50); // Increased delay for stability
+    }
   });
-  for (var i = 0; i < targets.length; i++) { observer.observe(targets[i], { childList: true, subtree: true, characterData: true }); }
+  for (var i = 0; i < targets.length; i++) { 
+    observer.observe(targets[i], { childList: true, subtree: true, characterData: true }); 
+  }
 }
 
 function initSidebar() {
@@ -66,7 +84,22 @@ window.handleNav = function(page) { goToPage(page); };
 window.closeSidebar = function() { closeMobileSidebar(); };
 window.toggleMobileLang = function() { var b = document.getElementById('mobileLangBtn'); var d = document.getElementById('mobileLangDrop'); if (!b||!d) return; d.classList.toggle('show', !d.classList.contains('show')); b.classList.toggle('open', !b.classList.contains('open')); };
 
-function getPageFromHash() { var h = window.location.hash.replace('#','').trim(); var m = {'numbers':'numbers','home':'numbers','add-funds':'deposit','deposit':'deposit','history':'history','referral':'settings','settings':'settings','help':'help','contacts':'contacts'}; return m[h] || h || 'numbers'; }
+function getPageFromHash() {
+  var h = window.location.hash.replace('#','').trim();
+  var m = {
+    'numbers':'numbers',
+    'home':'numbers',
+    'add-funds':'deposit',
+    'deposit':'deposit',
+    'history':'history',
+    'referral':'settings',
+    'settings':'settings',
+    'help':'help',
+    'contacts':'contacts'
+    // Removed 'rent' and 'cards' references
+  };
+  return m[h] || h || 'numbers';
+}
 function updateHash(page) { if (window.location.hash.replace('#','') !== page) window.history.replaceState(null,'','#'+page); }
 function navigateTo(page) { goToPage(page); }
 function initNavigation() { document.querySelectorAll('.nav-link[data-page]').forEach(function(link) { link.addEventListener('click', function() { goToPage(this.dataset.page); }); }); }
@@ -136,7 +169,8 @@ function renderMainContent() {
   if (typeof window[functionName] === 'function') { try { window[functionName](main); } catch(error) { main.innerHTML = '<div style="padding:20px;background:#ffebee;border:2px solid red;border-radius:12px;color:#c62828;">CRASH: '+error.message+'</div>'; } }
   else { main.innerHTML = '<div class="empty-state"><i class="fas fa-exclamation-triangle"></i><p>'+t('Page')+' "'+page+'" '+t('is missing')+'</p></div>'; }
   if (page === 'deposit') { loadBalance().then(function(b) { var el = document.getElementById('depositCurrentBalance'); if (el) el.textContent = '$' + b.toFixed(2); }); if (typeof loadDepositHistory === 'function') loadDepositHistory(); }
-  setTimeout(function() { applyTranslations(); }, 10);
+  // Increased delay to ensure DOM is ready
+  setTimeout(function() { applyTranslations(); }, 100);
 }
 
 function copyNumber(phone) { navigator.clipboard.writeText(phone.replace(/\s/g,'')).then(function() { showToast(t('Number copied to clipboard'), 'success'); }).catch(function() { showToast(t('Copy failed'), 'error'); }); }
@@ -180,7 +214,6 @@ function startDepositPollingByRef(reference) {
   
   var attempts = 0;
   var balanceRetryCount = 0;
-  var lastKnownStatus = null;
   
   depositPollingInterval = setInterval(function() {
     attempts++;
@@ -191,13 +224,11 @@ function startDepositPollingByRef(reference) {
         return res.json();
       })
       .then(function(data) {
-        lastKnownStatus = data.status;
-        
         if (data.status === 'completed') {
           showToast(t('Payment successful! Balance updated.'), 'success');
           stopDepositPolling();
           
-          // Keep refreshing balance for 2 minutes (backend may delay balance credit)
+          // Keep refreshing balance for 2 minutes
           balanceRetryCount = 0;
           (function keepRefreshingBalance() {
             balanceRetryCount++;
@@ -208,7 +239,6 @@ function startDepositPollingByRef(reference) {
             }, 5000);
           })();
           
-          // Reload deposit history
           if (typeof loadDepositHistory === 'function') loadDepositHistory();
           if (window.currentPage === 'deposit') renderMainContent();
           return;
@@ -224,11 +254,9 @@ function startDepositPollingByRef(reference) {
           return;
         }
         
-        // Still pending - continue polling
-        if (attempts >= 36) { // 36 * 5s = 3 minutes
+        if (attempts >= 36) {
           stopDepositPolling();
           showToast(t('Payment is still processing. It will update automatically.'), 'info');
-          // Continue background polling less frequently
           if (typeof startBackgroundPolling === 'function') {
             startBackgroundPolling(reference);
           }
@@ -335,7 +363,7 @@ var translations = {
     'Payment failed or cancelled.':'Payment failed or cancelled.',
     'Payment is still processing. It will update automatically.':'Payment is still processing. It will update automatically.',
 
-    // === REFERRAL PAGE (NEW) ===
+    // === REFERRAL PAGE ===
     'Recommend the service and earn money':'Recommend the service and earn money',
     'Share your referral link and earn 10% commission on every purchase':'Share your referral link and earn 10% commission on every purchase',
     'Read more...':'Read more...',
@@ -360,8 +388,8 @@ var translations = {
     'No withdrawals yet':'No withdrawals yet',
     'When someone signs up using your link, they will appear here':'When someone signs up using your link, they will appear here',
     'Your withdrawal history will appear here':'Your withdrawal history will appear here',
-    'Commission':'Commission','User':'User','Date':'Date',
-    'Withdrawn':'Withdrawn','Status':'Status',
+    'Commission':'Commission','User':'User',
+    'Withdrawn':'Withdrawn',
     'Earn':'Earn','for each referral':'for each referral',
     'Your referral link':'Your referral link','Copy Link':'Copy Link',
     'Referral earnings':'Referral earnings','Total referrals':'Total referrals',
@@ -381,7 +409,7 @@ var translations = {
     'Enter subject':'Enter subject',
     'Enter your email':'Enter your email',
 
-    // === HELP / USER GUIDE PAGE (NEW) ===
+    // === HELP PAGE ===
     'FAQ':'FAQ','Frequently Asked Questions':'Frequently Asked Questions',
     'How it works':'How it works','Support':'Support',
     'User Guide':'User Guide',
@@ -405,13 +433,9 @@ var translations = {
     'Choose a country':'Choose a country',
     'Get your number':'Get your number',
     'Service Types':'Service Types',
-    'Activations':'Activations','Rent':'Rent',
+    'Activations':'Activations',
     'Short-term numbers valid for approximately 20 minutes':'Short-term numbers valid for approximately 20 minutes',
     'approximately 20 minutes':'approximately 20 minutes',
-    'Long-term rental up to 30 days':'Long-term rental up to 30 days',
-    'up to 30 days':'up to 30 days',
-    'Short-term virtual numbers':'Short-term virtual numbers',
-    'Long-term number rental':'Long-term number rental',
     'SMS Not Received?':'SMS Not Received?',
     'Wait at least 3 minutes before canceling':'Wait at least 3 minutes before canceling',
     'at least 3 minutes':'at least 3 minutes',
@@ -438,8 +462,6 @@ var translations = {
     'Try requesting a new number':'Try requesting a new number',
     'Check if the service is available':'Check if the service is available',
     'Contact support':'Contact support',
-
-    // === HELP PAGE BOTTOM (NEW) ===
     'No Cancellations Within 45s':'No Cancellations Within 45s',
     'Please wait at least 45 seconds before canceling to allow the system to process your request properly':'Please wait at least 45 seconds before canceling to allow the system to process your request properly',
     'wait at least 45 seconds before canceling':'wait at least 45 seconds before canceling',
@@ -509,6 +531,12 @@ var translations = {
     'Copied!':'Copied!','Link copied':'Link copied',
     'Nothing here yet':'Nothing here yet',
     'You have no items':'You have no items',
+    'Rent Number': 'Rent Number',
+    'Virtual Cards': 'Virtual Cards',
+    '租用号码': 'Rent Number',
+    '虚拟卡': 'Virtual Cards',
+    'Аренда номера': 'Rent Number',
+    'Виртуальные карты': 'Virtual Cards', 
     'Start by getting a number':'Start by getting a number',
     'Get started':'Get started'
   },
@@ -607,7 +635,7 @@ var translations = {
     'Contact Us':'联系我们','Get in Touch':'联系我们',
     'Send Message':'发送消息',
     'Subject':'主题','Your message':'您的消息',
-    'Name':'姓名','Email':'邮箱','Telephone':'电话',
+    'Name':'姓名','Email':'邮箱',
     'Message sent successfully':'消息发送成功',
     'Error sending message':'消息发送失败',
     'Type your message...':'输入您的消息...',
@@ -637,13 +665,9 @@ var translations = {
     'Choose a country':'选择国家',
     'Get your number':'获取号码',
     'Service Types':'服务类型',
-    'Activations':'短期激活','Rent':'长期租赁',
+    'Activations':'短期激活',
     'Short-term numbers valid for approximately 20 minutes':'短期号码，有效期约20分钟',
     'approximately 20 minutes':'约20分钟',
-    'Long-term rental up to 30 days':'长期租赁，最长30天',
-    'up to 30 days':'最长30天',
-    'Short-term virtual numbers':'短期虚拟号码',
-    'Long-term number rental':'长期号码租赁',
     'SMS Not Received?':'没收到短信？',
     'Wait at least 3 minutes before canceling':'取消前请至少等待3分钟',
     'at least 3 minutes':'至少3分钟',
@@ -732,6 +756,12 @@ var translations = {
     'View all':'查看全部','See all':'查看全部',
     'Copied!':'已复制！','Link copied':'链接已复制',
     'Nothing here yet':'这里还没有内容',
+    'Rent Number': '租用号码',
+    'Virtual Cards': '虚拟卡',
+    '租用号码': '租用号码',
+    '虚拟卡': '虚拟卡',
+    'Аренда номера': '租用号码',
+    'Виртуальные карты': '虚拟卡',
     'You have no items':'您没有项目',
     'Start by getting a number':'从获取一个号码开始',
     'Get started':'开始使用'
@@ -831,7 +861,7 @@ var translations = {
     'Contact Us':'Связаться с нами','Get in Touch':'Связаться с нами',
     'Send Message':'Отправить сообщение',
     'Subject':'Тема','Your message':'Ваше сообщение',
-    'Name':'Имя','Email':'Email','Telephone':'Телефон',
+    'Name':'Имя','Email':'Email',
     'Message sent successfully':'Сообщение отправлено',
     'Error sending message':'Ошибка отправки',
     'Type your message...':'Введите ваше сообщение...',
@@ -861,13 +891,9 @@ var translations = {
     'Choose a country':'Выберите страну',
     'Get your number':'Получите номер',
     'Service Types':'Типы сервисов',
-    'Activations':'Активации','Rent':'Аренда',
-    'Short-term numbers valid for approximately 20 minutes':'Краткосрочные номера, действительны约20 минут',
+    'Activations':'Активации',
+    'Short-term numbers valid for approximately 20 minutes':'Краткосрочные номера, действительны около 20 минут',
     'approximately 20 minutes':'около 20 минут',
-    'Long-term rental up to 30 days':'Долгосрочная аренда до 30 дней',
-    'up to 30 days':'до 30 дней',
-    'Short-term virtual numbers':'Краткосрочные номера',
-    'Long-term number rental':'Долгосрочная аренда номеров',
     'SMS Not Received?':'Нет SMS?',
     'Wait at least 3 minutes before canceling':'Подождите минимум 3 минуты перед отменой',
     'at least 3 minutes':'минимум 3 минуты',
@@ -957,6 +983,13 @@ var translations = {
     'Copied!':'Скопировано!','Link copied':'Ссылка скопирована',
     'Nothing here yet':'Здесь пока пусто',
     'You have no items':'У вас нет элементов',
+    'Rent Number': 'Аренда номера',
+    'Rent Number': 'Аренда номера',
+    'Virtual Cards': 'Виртуальные карты',
+    '租用号码': 'Аренда номера',
+    '虚拟卡': 'Виртуальные карты',
+    'Аренда номера': 'Аренда номера',
+    'Виртуальные карты': 'Виртуальные карты',  
     'Start by getting a number':'Начните с получения номера',
     'Get started':'Начать'
   }
@@ -980,73 +1013,143 @@ function changeLanguage(lang) {
   var mld = document.getElementById('mobileLangDrop'); if (mld) mld.classList.remove('show','open','active');
   var mlb = document.getElementById('mobileLangBtn'); if (mlb) mlb.classList.remove('open');
 
-  _isTranslating = true;
-
-  // 3. Set the new language
+  // 3. Set the new language IMMEDIATELY
   currentLang = lang;
   localStorage.setItem('language', lang);
 
-  // 4. Re-render dynamic content (pages + sidebar)
+  // 4. Translate EVERYTHING immediately (before any re-renders)
+  applyTranslations();
+
+  // 5. Re-render dynamic content (pages + sidebar)
   if (typeof renderSidebar === 'function') {
     var s = document.getElementById('serviceSearch');
     renderSidebar(s ? s.value : '');
   }
   renderMainContent();
 
-  // 5. Translate everything (static HTML + dynamic)
-  applyTranslations();
-
-  _isTranslating = false;
+  // 6. Translate AGAIN after re-renders complete
+  setTimeout(function() {
+    applyTranslations();
+  }, 100);
+  
+  setTimeout(function() {
+    applyTranslations();
+  }, 300);
+  
   closeMobileSidebar();
 }
 
 function applyTranslations() {
   var tr = translations[currentLang];
   if (!tr) return;
-  document.querySelectorAll('[data-i18n]').forEach(function(el) { var k = el.getAttribute('data-i18n'); if (tr[k] !== undefined) el.textContent = tr[k]; });
-  document.querySelectorAll('[data-i18n-placeholder]').forEach(function(el) { var k = el.getAttribute('data-i18n-placeholder'); if (tr[k] !== undefined) el.placeholder = tr[k]; });
-  document.querySelectorAll('[data-i18n-title]').forEach(function(el) { var k = el.getAttribute('data-i18n-title'); if (tr[k] !== undefined) el.title = tr[k]; });
-  document.querySelectorAll('input[placeholder], textarea[placeholder]').forEach(function(el) { if (el.hasAttribute('data-i18n-placeholder')) return; var ph = el.getAttribute('placeholder'); if (ph && tr[ph] !== undefined) el.placeholder = tr[ph]; });
-  document.querySelectorAll('select option').forEach(function(opt) { if (opt.hasAttribute('data-i18n')) return; var txt = opt.textContent.trim(); if (txt && tr[txt] !== undefined) opt.textContent = tr[txt]; });
+  
+  // Translate elements with data-i18n attributes (scan ENTIRE document)
+  document.querySelectorAll('[data-i18n]').forEach(function(el) { 
+    var k = el.getAttribute('data-i18n'); 
+    if (tr[k] !== undefined) el.textContent = tr[k]; 
+  });
+  
+  // Translate placeholders
+  document.querySelectorAll('[data-i18n-placeholder]').forEach(function(el) { 
+    var k = el.getAttribute('data-i18n-placeholder'); 
+    if (tr[k] !== undefined) el.placeholder = tr[k]; 
+  });
+  
+  // Translate titles
+  document.querySelectorAll('[data-i18n-title]').forEach(function(el) { 
+    var k = el.getAttribute('data-i18n-title'); 
+    if (tr[k] !== undefined) el.title = tr[k]; 
+  });
+  
+  // Translate select options
+  document.querySelectorAll('select option:not([data-i18n])').forEach(function(opt) { 
+    var txt = opt.textContent.trim(); 
+    if (txt && tr[txt] !== undefined) opt.textContent = tr[txt]; 
+  });
+  
+  // Scan ALL text nodes in the ENTIRE document (including sidebar)
   ultraScanTextNodes(tr);
-  document.querySelectorAll('[title]').forEach(function(el) { if (el.hasAttribute('data-i18n-title')) return; var title = el.getAttribute('title'); if (title && tr[title] !== undefined) el.title = tr[title]; });
 }
 
 function ultraScanTextNodes(tr) {
-  var root = document.getElementById('appPages') || document.body;
+  var root = document.documentElement;
+  
   var sortedKeys = Object.keys(tr).filter(function(k) { return k.length >= 2; });
   sortedKeys.sort(function(a, b) { return b.length - a.length; });
+  
   var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
     acceptNode: function(node) {
-  var parent = node.parentNode;
-  if (!parent) return NodeFilter.FILTER_REJECT;
-  
-  // Skip elements marked as do-not-translate (Logo)
-  if (parent.closest && parent.closest('[data-notranslate]')) return NodeFilter.FILTER_REJECT;
-  
-  var tag = parent.tagName;
-  if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'NOSCRIPT' || tag === 'OPTION') return NodeFilter.FILTER_REJECT;
-  if (parent.hasAttribute && parent.hasAttribute('data-i18n')) return NodeFilter.FILTER_REJECT;
-  if (!node.textContent || !node.textContent.trim()) return NodeFilter.FILTER_REJECT;
-  return NodeFilter.FILTER_ACCEPT;
-}
+      var parent = node.parentNode;
+      if (!parent) return NodeFilter.FILTER_REJECT;
+      
+      if (parent.closest && parent.closest('[data-notranslate]')) return NodeFilter.FILTER_REJECT;
+      
+      var tag = parent.tagName;
+      if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'NOSCRIPT') return NodeFilter.FILTER_REJECT;
+      if (parent.hasAttribute && parent.hasAttribute('data-i18n')) return NodeFilter.FILTER_REJECT;
+      if (!node.textContent || !node.textContent.trim()) return NodeFilter.FILTER_REJECT;
+      
+      return NodeFilter.FILTER_ACCEPT;
+    }
   });
-  var nodes = []; var n; while (n = walker.nextNode()) nodes.push(n);
+  
+  var nodes = []; 
+  var n; 
+  while (n = walker.nextNode()) nodes.push(n);
+  
+  function hasCJK(str) {
+    return /[\u4e00-\u9fff\u3400-\u4dbf\u3000-\u303f\uff00-\uffef]/.test(str);
+  }
+  
+  var cjkKeys = [];
+  var nonCjkKeys = [];
+  for (var k = 0; k < sortedKeys.length; k++) {
+    if (hasCJK(sortedKeys[k])) {
+      cjkKeys.push(sortedKeys[k]);
+    } else {
+      // CHANGED: Include all keys 2+ chars (was 3+)
+      nonCjkKeys.push(sortedKeys[k]);
+    }
+  }
+  
   for (var i = 0; i < nodes.length; i++) {
-    var textNode = nodes[i]; var original = textNode.textContent; var result = original;
+    var textNode = nodes[i]; 
+    var original = textNode.textContent; 
+    var result = original;
     var trimmed = original.trim();
+    
+    // EXACT MATCH FIRST
     if (tr[trimmed] !== undefined) {
       var prefix = original.substring(0, original.indexOf(trimmed));
       var suffix = original.substring(original.indexOf(trimmed) + trimmed.length);
       textNode.textContent = prefix + tr[trimmed] + suffix;
       continue;
     }
-    for (var j = 0; j < sortedKeys.length; j++) {
-      var key = sortedKeys[j]; var val = tr[key];
-      var escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      var regex = new RegExp('\\b' + escaped + '\\b', 'g');
-      if (regex.test(result)) { result = result.replace(regex, val); }
+    
+    var isCJK = hasCJK(trimmed);
+    
+    if (isCJK) {
+      for (var j = 0; j < cjkKeys.length; j++) {
+        var key = cjkKeys[j]; 
+        var val = tr[key];
+        if (result.indexOf(key) !== -1) {
+          result = result.split(key).join(val);
+        }
+      }
+    } else {
+      for (var j = 0; j < nonCjkKeys.length; j++) {
+        var key = nonCjkKeys[j]; 
+        var val = tr[key];
+        
+        var escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        var regex = new RegExp('\\b' + escaped + '\\b', 'gi');
+        
+        if (regex.test(result)) { 
+          result = result.replace(regex, val); 
+        }
+      }
     }
+    
     if (result !== original) textNode.textContent = result;
   }
 }
@@ -1115,4 +1218,3 @@ function updateThemeButton() {
     }
   }
 }
-

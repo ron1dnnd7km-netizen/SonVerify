@@ -583,6 +583,78 @@ app.post('/api/numbers/:id/receive', async function(req, res) {
 });
 
 // ====================================================================
+// ====== NUMBERS SAVE (for SMS-Bus proxy purchases) ======
+// ====================================================================
+
+app.post('/api/numbers/save', async function(req, res) {
+  try {
+    var email = req.body.email;
+    var activationId = req.body.activationId;
+    var phone = req.body.phone;
+    var serviceName = req.body.serviceName;
+    var serviceId = req.body.serviceId;
+    var serviceIcon = req.body.serviceIcon;
+    var countryCode = req.body.countryCode;
+    var countryFlag = req.body.countryFlag;
+    var countryName = req.body.countryName;
+    var cost = req.body.cost;
+    var status = req.body.status || 'waiting';
+    var createdAt = req.body.createdAt;
+    var totalTime = req.body.totalTime || 300;
+
+    if (!email || !activationId || !phone) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    var user = await db.prepare('SELECT balance FROM users WHERE email = $1').get(email);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (user.balance < cost) return res.status(400).json({ error: 'Insufficient balance' });
+
+    // Deduct balance
+    await db.prepare('UPDATE users SET balance = balance - $1 WHERE email = $2').run(cost, email);
+
+    // Insert number
+    await db.prepare(
+      'INSERT INTO numbers (email, provider_request_id, phone, service_name, service_id, service_icon, country_code, country_flag, country_name, cost, status, created_at, total_time, time_left, code, sms_text) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NULL, NULL)'
+    ).run(email, activationId, phone, serviceName, serviceId, serviceIcon, countryCode, countryFlag, countryName, cost, status, createdAt, totalTime, totalTime);
+
+    // Add to history
+    await db.prepare(
+      "INSERT INTO history (email, service_name, phone, code, status, cost) VALUES ($1, $2, $3, NULL, 'pending', $4)"
+    ).run(email, serviceName, phone, cost);
+
+    var updatedUser = await db.prepare('SELECT balance FROM users WHERE email = $1').get(email);
+    res.json({ success: true, balance: parseFloat(updatedUser.balance) });
+
+  } catch (err) {
+    console.error('Save number error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/numbers/:id/code', async function(req, res) {
+  try {
+    var code = req.body.code;
+    var smsText = req.body.smsText;
+    var num = await db.prepare('SELECT * FROM numbers WHERE provider_request_id = $1').get(req.params.id);
+    
+    if (!num) {
+      // Try by regular id
+      num = await db.prepare('SELECT * FROM numbers WHERE id = $1').get(req.params.id);
+    }
+    
+    if (!num) return res.status(404).json({ error: 'Number not found' });
+
+    await db.prepare('UPDATE numbers SET status = $1, code = $2, sms_text = $3 WHERE id = $4').run('received', code, smsText, num.id);
+    await db.prepare("INSERT INTO history (email, service_name, phone, code, status, cost) VALUES ($1, $2, $3, $4, 'success', $5)").run(num.email, num.service_name, num.phone, code, num.cost);
+
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ====================================================================
 // ====== HISTORY ======
 // ====================================================================
 
@@ -1124,16 +1196,467 @@ app.get('/api/admin/referrals', requireAdmin, async function(req, res) {
   }
 });
 
+// ====================================================================
+// ====== SMS-BUS PROXY ROUTES (Regular number purchases) ======
+// ====================================================================
+
+const SMS_BUS_TOKEN = 'd4a7951968ed4e59a647a0ac1d1af637';
+const SMS_BUS_BASE = 'https://sms-bus.com/api/control/list';
+
+// GET /api/v2/prices?country_id=5
+app.get('/api/v2/prices', async function(req, res) {
+  try {
+    var country_id = req.query.country_id;
+    var response = await fetch(SMS_BUS_BASE + '/prices?token=' + SMS_BUS_TOKEN + '&country_id=' + country_id);
+    var data = await response.json();
+    res.json(data);
+  } catch (err) {
+    console.error('SMS-Bus prices error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/v2/buy
+app.post('/api/v2/buy', async function(req, res) {
+  try {
+    var country_id = req.body.country_id;
+    var service_code = req.body.service_code;
+    var email = req.body.email;
+    
+    var response = await fetch(SMS_BUS_BASE + '/buy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        token: SMS_BUS_TOKEN,
+        country_id: country_id,
+        service_code: service_code,
+        email: email
+      })
+    });
+    var data = await response.json();
+    res.json(data);
+  } catch (err) {
+    console.error('SMS-Bus buy error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/v2/status
+app.post('/api/v2/status', async function(req, res) {
+  try {
+    var id = req.body.id;
+    var response = await fetch(SMS_BUS_BASE + '/status', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: SMS_BUS_TOKEN, id: id })
+    });
+    var data = await response.json();
+    res.json(data);
+  } catch (err) {
+    console.error('SMS-Bus status error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/v2/cancel
+app.post('/api/v2/cancel', async function(req, res) {
+  try {
+    var id = req.body.id;
+    var response = await fetch(SMS_BUS_BASE + '/cancel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: SMS_BUS_TOKEN, id: id })
+    });
+    var data = await response.json();
+    res.json(data);
+  } catch (err) {
+    console.error('SMS-Bus cancel error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/// ====================================================================
+// ====== SMS-BUS RENTAL PROXY ROUTES (WITH DEBUG) ======
+// ====================================================================
+
+// Try BOTH possible URLs - we'll see which one works
+const SMS_BUS_URLS = [
+  'https://api.sms-bus.com',
+  'https://sms-bus.com'
+];
+
+// Cache which URL works
+let SMS_BUS_RENTAL_BASE = null;
+
+async function findWorkingRentUrl() {
+  if (SMS_BUS_RENTAL_BASE) return SMS_BUS_RENTAL_BASE;
+  
+  for (var i = 0; i < SMS_BUS_URLS.length; i++) {
+    try {
+      var url = SMS_BUS_URLS[i] + '/v1/rent/list/area?token=' + SMS_BUS_TOKEN;
+      console.log('[RENT DEBUG] Trying:', url);
+      var response = await fetch(url, { signal: AbortSignal.timeout(10000) });
+      var data = await response.json();
+      console.log('[RENT DEBUG] Response from ' + SMS_BUS_URLS[i] + ':', JSON.stringify(data).substring(0, 300));
+      
+      if (data.code === 200 && data.data) {
+        SMS_BUS_RENTAL_BASE = SMS_BUS_URLS[i];
+        console.log('[RENT DEBUG] ✓ Working URL found:', SMS_BUS_RENTAL_BASE);
+        return SMS_BUS_RENTAL_BASE;
+      }
+    } catch (err) {
+      console.log('[RENT DEBUG] ✗ Failed with ' + SMS_BUS_URLS[i] + ':', err.message);
+    }
+  }
+  
+  console.log('[RENT DEBUG] ✗ No working URL found');
+  return null;
+}
+
+// GET /api/v2/rent/areas?area_code=US
+app.get('/api/v2/rent/areas', async function(req, res) {
+  try {
+    var areaCode = req.query.area_code;
+    
+    var baseUrl = await findWorkingRentUrl();
+    if (!baseUrl) {
+      return res.json({ 
+        code: 0, 
+        data: [],
+        debug: 'Could not reach SMS-Bus rental API',
+        tried: SMS_BUS_URLS
+      });
+    }
+    
+    var url = baseUrl + '/v1/rent/list/area?token=' + SMS_BUS_TOKEN;
+    var response = await fetch(url);
+    var data = await response.json();
+    
+    var areas = data.data || [];
+    
+    // Filter if specific area requested
+    if (areaCode && Array.isArray(areas)) {
+      var filtered = areas.filter(function(a) {
+        return (a.area_code || '').toUpperCase() === areaCode.toUpperCase();
+      });
+      if (filtered.length > 0) {
+        areas = filtered;
+      } else {
+        // Area not found - return empty but successful so UI shows "not available" not error
+        areas = [];
+      }
+    }
+    
+    res.json({ code: data.code || 200, data: areas });
+  } catch (err) {
+    console.error('Rental areas error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/v2/rent/get
+app.post('/api/v2/rent/get', async function(req, res) {
+  try {
+    var area_code = req.body.area_code;
+    var time = req.body.time;
+    var email = req.body.email;
+    
+    var baseUrl = await findWorkingRentUrl();
+    if (!baseUrl) {
+      return res.status(502).json({ error: 'SMS-Bus rental API unreachable' });
+    }
+    
+    var url = baseUrl + '/v1/rent/get/number' +
+      '?token=' + SMS_BUS_TOKEN +
+      '&area_code=' + area_code +
+      '&time=' + time;
+    
+    console.log('[RENT] Renting from:', url);
+    
+    var response = await fetch(url);
+    var data = await response.json();
+    
+    console.log('[RENT] Rent response:', JSON.stringify(data).substring(0, 500));
+    
+        if (data.code !== 200) {
+      var msg = (data.message || data.msg || '').toLowerCase();
+      if (msg.includes('balance') || msg.includes('not enough') || msg.includes('insufficient')) {
+        return res.status(502).json({ error: 'Try again or Try a different country.' });
+      }
+      return res.status(502).json({ error: 'No numbers available right now. Try again later.' });
+    }
+    
+    res.json({ code: 200, data: data.data });
+  } catch (err) {
+    console.error('Rent get error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/v2/rent/sms
+app.post('/api/v2/rent/sms', async function(req, res) {
+  try {
+    var rentalId = req.body.rentalId;
+    var parts = rentalId.split(':');
+    var area_code = parts[0];
+    var mobile_number = parts[1];
+    
+    if (!area_code || !mobile_number) {
+      return res.status(400).json({ error: 'Invalid rental ID format' });
+    }
+    
+    var baseUrl = await findWorkingRentUrl();
+    if (!baseUrl) {
+      return res.status(502).json({ error: 'SMS-Bus rental API unreachable' });
+    }
+    
+    var [latestRes, listRes] = await Promise.all([
+      fetch(baseUrl + '/v1/rent/get/sms?token=' + SMS_BUS_TOKEN + '&area_code=' + area_code + '&mobile_number=' + mobile_number),
+      fetch(baseUrl + '/v1/rent/list/sms?token=' + SMS_BUS_TOKEN + '&area_code=' + area_code + '&mobile_number=' + mobile_number + '&page_size=50')
+    ]);
+    
+    var latestData = await latestRes.json();
+    var listData = await listRes.json();
+    
+    var result;
+    if (listData.code === 200 && listData.data && listData.data.list && listData.data.list.length > 0) {
+      result = { list: listData.data.list };
+    } else if (latestData.code === 200 && latestData.data) {
+      result = latestData.data;
+    } else {
+      result = { content: null };
+    }
+    
+    res.json({ code: 200, data: result });
+  } catch (err) {
+    console.error('Rent SMS error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/v2/rent/cancel
+app.post('/api/v2/rent/cancel', async function(req, res) {
+  try {
+    var orderId = req.body.orderId;
+    
+    var baseUrl = await findWorkingRentUrl();
+    if (!baseUrl) {
+      return res.status(502).json({ error: 'SMS-Bus rental API unreachable' });
+    }
+    
+    var url = baseUrl + '/v1/rent/cancel/order' +
+      '?token=' + SMS_BUS_TOKEN +
+      '&order_id=' + orderId;
+    
+    var response = await fetch(url);
+    var data = await response.json();
+    
+    if (data.code !== 200) {
+      return res.status(502).json({ error: data.message || 'Failed to cancel' });
+    }
+    
+    res.json({ code: 200, data: data.data });
+  } catch (err) {
+    console.error('Rent cancel error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DEBUG ROUTE - call this to see what SMS-Bus returns
+app.get('/api/v2/rent/debug', async function(req, res) {
+  var results = {};
+  
+  for (var i = 0; i < SMS_BUS_URLS.length; i++) {
+    var url = SMS_BUS_URLS[i] + '/v1/rent/list/area?token=' + SMS_BUS_TOKEN;
+    try {
+      var response = await fetch(url, { signal: AbortSignal.timeout(10000) });
+      var text = await response.text();
+      results[SMS_BUS_URLS[i]] = {
+        status: response.status,
+        body: text.substring(0, 500),
+        ok: response.ok
+      };
+    } catch (err) {
+      results[SMS_BUS_URLS[i]] = {
+        error: err.message
+      };
+    }
+  }
+  
+  // Also test the regular API to confirm token works
+  try {
+    var regularUrl = 'https://sms-bus.com/api/control/list/countries?token=' + SMS_BUS_TOKEN;
+    var regRes = await fetch(regularUrl, { signal: AbortSignal.timeout(10000) });
+    var regData = await regRes.json();
+    results['regular_api_test'] = {
+      status: regRes.status,
+      code: regData.code,
+      countryCount: regData.data ? Object.keys(regData.data).length : 0,
+      tokenWorks: regData.code === 200
+    };
+  } catch (err) {
+    results['regular_api_test'] = { error: err.message };
+  }
+  
+  res.json(results);
+});
 
 // ====================================================================
-// ====== CATCH-ALL ======
+// ====== RENTALS DATABASE (PostgreSQL syntax) ======
 // ====================================================================
+
+// POST /api/rentals/save
+app.post('/api/rentals/save', async function(req, res) {
+  try {
+    var email = req.body.email;
+    var rentId = req.body.rentId;
+    var smsFetchId = req.body.smsFetchId;
+    var phone = req.body.phone;
+    var dialingCode = req.body.dialingCode;
+    var planId = req.body.planId;
+    var planName = req.body.planName;
+    var durationMonths = req.body.durationMonths;
+    var providerCost = req.body.providerCost;
+    var cost = req.body.cost;
+    var countryCode = req.body.countryCode;
+    var countryFlag = req.body.countryFlag;
+    var countryName = req.body.countryName;
+    var expiresAt = req.body.expiresAt;
+    var status = req.body.status || 'active';
+
+    if (!email || !rentId || !phone) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    var user = await db.prepare('SELECT balance FROM users WHERE email = $1').get(email);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (user.balance < cost) return res.status(400).json({ error: 'Insufficient balance' });
+
+    // Deduct balance
+    await db.prepare('UPDATE users SET balance = balance - $1 WHERE email = $2').run(cost, email);
+
+    // Insert rental (using JSON for sms array)
+    await db.prepare(
+      'INSERT INTO rentals (email, rent_id, sms_fetch_id, phone, dialing_code, plan_id, plan_name, duration_months, provider_cost, cost, country_code, country_flag, country_name, status, expires_at, created_at, sms) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17::jsonb)'
+    ).run(email, rentId, smsFetchId, phone, dialingCode, planId, planName, durationMonths, providerCost, cost, countryCode, countryFlag, countryName, status, expiresAt, new Date().toISOString(), '[]');
+
+    var updatedUser = await db.prepare('SELECT balance FROM users WHERE email = $1').get(email);
+    
+    var rental = {
+      id: rentId,
+      smsFetchId: smsFetchId,
+      phone: phone,
+      dialingCode: dialingCode,
+      planName: planName,
+      durationMonths: durationMonths,
+      cost: cost,
+      countryCode: countryCode,
+      countryFlag: countryFlag,
+      status: status,
+      expiresAt: expiresAt,
+      sms: []
+    };
+    
+    res.json({ success: true, balance: parseFloat(updatedUser.balance), rental: rental });
+
+  } catch (err) {
+    console.error('Save rental error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/rentals/:email
+app.get('/api/rentals/:email', async function(req, res) {
+  try {
+    var rentals = await db.prepare(
+      "SELECT * FROM rentals WHERE email = $1 AND status = 'active' ORDER BY created_at DESC"
+    ).all(req.params.email);
+    
+    // Parse JSON sms field and format response
+    var formatted = rentals.map(function(r) {
+      var sms = [];
+      if (r.sms) {
+        try { sms = typeof r.sms === 'string' ? JSON.parse(r.sms) : r.sms; } catch(e) { sms = []; }
+      }
+      return {
+        id: r.rent_id,
+        smsFetchId: r.sms_fetch_id,
+        phone: r.phone,
+        dialingCode: r.dialing_code,
+        planName: r.plan_name,
+        durationMonths: r.duration_months,
+        cost: parseFloat(r.cost),
+        countryCode: r.country_code,
+        countryFlag: r.country_flag,
+        status: r.status,
+        expiresAt: r.expires_at,
+        sms: sms
+      };
+    });
+    
+    res.json(formatted);
+  } catch (err) {
+    console.error('Get rentals error:', err.message);
+    res.json([]);
+  }
+});
+
+// DELETE /api/rental/:id
+app.delete('/api/rental/:id', async function(req, res) {
+  try {
+    var rentId = req.params.id;
+    
+    var rental = await db.prepare("SELECT * FROM rentals WHERE rent_id = $1 AND status = 'active'").get(rentId);
+    if (!rental) return res.status(404).json({ error: 'Rental not found' });
+
+    // Refund user
+    await db.prepare('UPDATE users SET balance = balance + $1 WHERE email = $2').run(rental.cost, rental.email);
+    
+    // Mark as cancelled
+    await db.prepare("UPDATE rentals SET status = 'cancelled' WHERE rent_id = $1").run(rentId);
+    
+    var user = await db.prepare('SELECT balance FROM users WHERE email = $1').get(rental.email);
+    res.json({ success: true, balance: parseFloat(user.balance) });
+    
+  } catch (err) {
+    console.error('Cancel rental error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/rental/:id/sms (update SMS for a rental)
+app.post('/api/rental/:id/sms', async function(req, res) {
+  try {
+    var rentId = req.params.id;
+    var sms = req.body.sms; // Array of SMS objects
+    
+    var rental = await db.prepare('SELECT * FROM rentals WHERE rent_id = $1').get(rentId);
+    if (!rental) return res.status(404).json({ error: 'Rental not found' });
+    
+    await db.prepare('UPDATE rentals SET sms = $1::jsonb WHERE rent_id = $2').run(JSON.stringify(sms), rentId);
+    
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Update rental SMS error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ====================================================================
+// ====== /api/deposit/kora ======
+// ====================================================================
+// ADD THIS RIGHT BEFORE THE /api/deposit/kora:
+app.get('/api/v2/rent/test', function(req, res) {
+  res.json({ ok: true, msg: 'Route works!' });
+});
+
 
 app.use(function(req, res, next) {
   if (req.path.startsWith('/api')) return res.status(404).json({ error: 'API route not found' });
   if (req.path.includes('.')) return res.status(404).send('File not found');
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
+
 
 // ====================================================================
 // ====== AUTO-LOAD SMS PROVIDER MAPS ON STARTUP ======
@@ -1165,6 +1688,48 @@ async function loadProviderMaps() {
 }
 
 loadProviderMaps();
+
+// ====================================================================
+// ====== CREATE RENTALS TABLE IF NOT EXISTS ======
+// ====================================================================
+
+async function ensureRentalsTable() {
+  try {
+    await db.prepare(`
+      CREATE TABLE IF NOT EXISTS rentals (
+        id SERIAL PRIMARY KEY,
+        email VARCHAR(255) NOT NULL,
+        rent_id VARCHAR(255) NOT NULL UNIQUE,
+        sms_fetch_id VARCHAR(255),
+        phone VARCHAR(50) NOT NULL,
+        dialing_code VARCHAR(10),
+        plan_id VARCHAR(50),
+        plan_name VARCHAR(100),
+        duration_months INTEGER DEFAULT 1,
+        provider_cost DECIMAL(10,2) DEFAULT 0,
+        cost DECIMAL(10,2) NOT NULL,
+        country_code VARCHAR(10),
+        country_flag VARCHAR(10),
+        country_name VARCHAR(100),
+        status VARCHAR(50) DEFAULT 'active',
+        expires_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        sms JSONB DEFAULT '[]'
+      )
+    `).run();
+    
+    // Add index for faster lookups
+    await db.prepare('CREATE INDEX IF NOT EXISTS idx_rentals_email ON rentals(email)').run();
+    await db.prepare('CREATE INDEX IF NOT EXISTS idx_rentals_rent_id ON rentals(rent_id)').run();
+    await db.prepare('CREATE INDEX IF NOT EXISTS idx_rentals_status ON rentals(status)').run();
+    
+    console.log('Rentals table ready');
+  } catch (err) {
+    console.error('Failed to create rentals table:', err.message);
+  }
+}
+
+ensureRentalsTable();
 
 // ====================================================================
 // ====== START SERVER ======

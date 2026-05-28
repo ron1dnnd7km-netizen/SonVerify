@@ -27,13 +27,22 @@
           SonVerify <span>
         </div>
         <div class="nav-links">
-          <button type="button" class="nav-link active" data-page="numbers" data-i18n="Home">Home</button>
-          <button type="button" class="nav-link" data-page="history" data-i18n="History">History</button>
-          <button type="button" class="nav-link" data-page="help" data-i18n="Help">Help</button>
-          <button type="button" class="nav-link" data-page="contacts" data-i18n="Contacts">Contacts</button>
-          <button type="button" class="nav-link" data-page="deposit" style="color:var(--accent);">
-            <i class="fas fa-plus" style="font-size:10px;margin-right:4px;"></i><span data-i18n="Add Funds">Add Funds</span>
+          <!-- AFTER (add data-i18n to each span) -->
+          <button class="nav-link" data-page="numbers"> <i class="fas fa-home"></i><span data-i18n="Home">Home</span> </button>
+          <button class="nav-link" data-page="rent"><i class="fas fa-calendar-alt"></i> <span data-i18n="Rent Number">Rent Number</span></button>
+         <button class="nav-link" data-page="cards"><i class="far fa-credit-card"></i> <span data-i18n="Virtual Cards">Virtual Cards</span></button>
+          <button class="nav-link" data-page="history">
+          <i class="fas fa-history"></i>
+          <span data-i18n="History">History</span>
           </button>
+          <button class="nav-link" data-page="help">
+    <i class="fas fa-question-circle"></i>
+    <span data-i18n="Help">Help</span>
+          </button>
+          <button class="nav-link" data-page="contacts">
+          <i class="fas fa-envelope"></i>
+          <span data-i18n="Contact Us">Contact Us</span>
+         </button>
         </div>
       </div>
       <div class="nav-right">
@@ -77,6 +86,8 @@
           <ul class="mobile-menu-list">
             <li class="menu-section-title" data-i18n="Menu">Menu</li>
             <li><button type="button" class="menu-nav-btn" data-page="numbers" onclick="handleNav('numbers')"><i class="fas fa-home"></i> <span data-i18n="Home">Home</span></button></li>
+            <li><button class="menu-nav-btn" data-page="rent" onclick="handleNav('rent')"><i class="fas fa-calendar-alt"></i> Rent Number</button></li>
+            <li><button class="menu-nav-btn" data-page="cards" onclick="handleNav('cards')"><i class="far fa-credit-card"></i> Virtual Cards</button></li>
             <li><button type="button" class="menu-nav-btn" data-page="deposit" onclick="handleNav('deposit')"><i class="fas fa-wallet"></i> <span data-i18n="Add Funds">Add Funds</span></button></li>
             <li><button type="button" class="menu-nav-btn" data-page="history" onclick="handleNav('history')"><i class="fas fa-clock-rotate-left"></i> <span data-i18n="History">History</span></button></li>
             <li><button type="button" class="menu-nav-btn" data-page="settings" onclick="handleNav('settings')"><i class="fas fa-gift"></i> <span data-i18n="Referral Program">Referral Program</span></button></li>
@@ -173,6 +184,7 @@
   <script src="js/sidebar.js"></script>
   <script src="js/modal.js"></script>
   <script src="js/pages.js?v=3"></script>
+  <script src="js/page-extra.js"></script>
   <script src="js/auth.js"></script>
   <script src="js/app.js"></script>
 </body>
