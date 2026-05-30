@@ -6,93 +6,52 @@ function addRentProfit(basePrice) { return parseFloat((basePrice * 1.2633).toFix
 function calcCardFee(loadAmount) { return parseFloat((loadAmount * 0.30).toFixed(2)); }
 
 var rentAreaCodeMap = {
-  'us': 'US', 'gb': 'GB', 'uk': 'GB', 'de': 'DE', 'ca': 'CA',
-  'au': 'AU', 'it': 'IT', 'es': 'ES', 'sa': 'SA', 'ae': 'AE',
-  'il': 'IL', 'ps': 'PS', 'tr': 'TR', 'qa': 'QA', 'jp': 'JP',
-  'at': 'AT', 'ng': 'NG', 'lt': 'LT', 'eg': 'EG', 'ie': 'IE',
-  'ci': 'CI', 'sg': 'SG', 'ee': 'EE', 'vn': 'VN', 'ro': 'RO',
-  'th': 'TH', 'in': 'IN', 'ru': 'RU', 'co': 'CO', 'rs': 'RS',
-  'ua': 'UA', 'cy': 'CY', 'lv': 'LV', 'my': 'MY', 'bo': 'BO',
-  'id': 'ID', 'pa': 'PA', 'ph': 'PH', 'dk': 'DK', 'ge': 'GE',
-  'cm': 'CM', 'bj': 'BJ', 'nz': 'NZ', 'ni': 'NI', 'kh': 'KH',
-  'mx': 'MX', 'kz': 'KZ', 'af': 'AF', 'al': 'AL', 'dz': 'DZ',
-  'ao': 'AO', 'ar': 'AR', 'am': 'AM', 'la': 'LA', 'bd': 'BD',
-  'za': 'ZA', 'ma': 'MA', 'mm': 'MM', 'tj': 'TJ', 'az': 'AZ',
-  'bh': 'BH', 'nl': 'NL', 'by': 'BY', 'bw': 'BW', 'br': 'BR',
-  'bg': 'BG', 'ke': 'KE', 'tz': 'TZ', 'kg': 'KG', 'fr': 'FR',
-  'pl': 'PL', 'mg': 'MG'
+  'us': 'US', 'gb': 'GB', 'uk': 'GB', 'ca': 'CA'
 };
 function getRentAreaCode(cc) { return rentAreaCodeMap[(cc || '').toLowerCase()] || null; }
 
 
 // =======================================================================
-// ===== FALLBACK RENT DATA (when API is down) =====
+// ===== FALLBACK RENT DATA (when API is down) - ONLY 3 COUNTRIES =====
 // =======================================================================
 var fallbackRentData = {
-  'US': { unit_price: 350, currency: 'USD', area_code: 'US', available: 150 },
-  'GB': { unit_price: 400, currency: 'USD', area_code: 'GB', available: 85 },
-  'DE': { unit_price: 380, currency: 'USD', area_code: 'DE', available: 62 },
-  'CA': { unit_price: 360, currency: 'USD', area_code: 'CA', available: 95 },
-  'AU': { unit_price: 420, currency: 'USD', area_code: 'AU', available: 45 },
-  'FR': { unit_price: 390, currency: 'USD', area_code: 'FR', available: 55 },
-  'IT': { unit_price: 370, currency: 'USD', area_code: 'IT', available: 48 },
-  'ES': { unit_price: 350, currency: 'USD', area_code: 'ES', available: 52 },
-  'NL': { unit_price: 400, currency: 'USD', area_code: 'NL', available: 38 },
-  'RU': { unit_price: 280, currency: 'USD', area_code: 'RU', available: 120 },
-  'IN': { unit_price: 200, currency: 'USD', area_code: 'IN', available: 200 },
-  'BR': { unit_price: 320, currency: 'USD', area_code: 'BR', available: 75 },
-  'JP': { unit_price: 500, currency: 'USD', area_code: 'JP', available: 30 },
-  'SA': { unit_price: 450, currency: 'USD', area_code: 'SA', available: 25 },
-  'AE': { unit_price: 480, currency: 'USD', area_code: 'AE', available: 22 },
-  'TR': { unit_price: 250, currency: 'USD', area_code: 'TR', available: 65 },
-  'PL': { unit_price: 300, currency: 'USD', area_code: 'PL', available: 70 },
-  'UA': { unit_price: 220, currency: 'USD', area_code: 'UA', available: 90 },
-  'ID': { unit_price: 180, currency: 'USD', area_code: 'ID', available: 150 },
-  'PH': { unit_price: 190, currency: 'USD', area_code: 'PH', available: 110 },
-  'MX': { unit_price: 270, currency: 'USD', area_code: 'MX', available: 80 },
-  'NG': { unit_price: 150, currency: 'USD', area_code: 'NG', available: 180 },
-  'KE': { unit_price: 160, currency: 'USD', area_code: 'KE', available: 95 }
+  'US': { unit_price: 300, currency: 'USD', area_code: 'US' },
+  'GB': { unit_price: 500, currency: 'USD', area_code: 'GB' },
+  'CA': { unit_price: 300, currency: 'USD', area_code: 'CA' }
 };
 
 
 // =======================================================================
-// ===== RENT API FUNCTIONS (with proper error handling & fallback) =====
+// ===== RENT API FUNCTIONS (uses cached country data, no extra API calls) =====
 // =======================================================================
 window.smsbusGetRentServices = async function(cc) {
   var ac = getRentAreaCode(cc);
   if (!ac) return null;
   
-  try {
-    var controller = new AbortController();
-    var timeoutId = setTimeout(function() { controller.abort(); }, 10000);
-    
-    var r = await fetch('/api/v2/rent/areas?area_code=' + ac, {
-      signal: controller.signal,
-      headers: { 'Accept': 'application/json' }
-    });
-    
-    clearTimeout(timeoutId);
-    
-    if (!r.ok) {
-      console.warn('Rent API returned status:', r.status);
-      return getFallbackRentData(ac);
+  // Use the already-fetched country list instead of making a new API call
+  // The API returns all countries at once, not individually by area_code
+  var cachedCountries = availableRentCountries || [];
+  
+  if (cachedCountries.length === 0) {
+    // If not cached yet, fetch now
+    try {
+      cachedCountries = await window.fetchRentCountries();
+    } catch (e) {
+      console.warn('Failed to fetch rent countries:', e.message);
     }
-    
-    var j = await r.json();
-    var a = j.data || j.areas || j;
-    
-    if (!Array.isArray(a) || a.length === 0) {
-      console.warn('Rent API returned empty/invalid data');
-      return getFallbackRentData(ac);
-    }
-    
-    var f = a.filter(function(x) { return (x.area_code || '').toUpperCase() === ac.toUpperCase(); });
-    return f.length > 0 ? f : a;
-    
-  } catch (e) {
-    console.warn('Rent services API error, using fallback:', e.message);
-    return getFallbackRentData(ac);
   }
+  
+  // Filter locally by area code
+  var filtered = cachedCountries.filter(function(x) { 
+    return (x.area_code || '').toUpperCase() === ac.toUpperCase(); 
+  });
+  
+  if (filtered.length > 0) {
+    return filtered;
+  }
+  
+  // Fallback data
+  return getFallbackRentData(ac);
 };
 
 function getFallbackRentData(areaCode) {
@@ -101,13 +60,7 @@ function getFallbackRentData(areaCode) {
     console.log('Using fallback rent data for', areaCode);
     return [fb];
   }
-  // Generic fallback for unlisted countries
-  return [{
-    unit_price: 350,
-    currency: 'USD',
-    area_code: areaCode,
-    available: 50
-  }];
+  return null;
 }
 
 window.smsbusCreateRent = async function(cc, months, email) {
@@ -120,30 +73,36 @@ window.smsbusCreateRent = async function(cc, months, email) {
     var r = await fetch('/api/v2/rent/get', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ area_code: ac, time: months, email: email || '' }),
+      body: JSON.stringify({ area_code: ac, time: months, service: 'any', email: email || '' }),
       signal: controller.signal
     });
     
     clearTimeout(timeoutId);
     
+    console.log('Rent API response status:', r.status);
+    
     if (!r.ok) {
       var err = await r.json().catch(function() { return {}; });
-      var errMsg = (err.error || err.message || '').toLowerCase();
-      if (errMsg.includes('balance') || errMsg.includes('not enough') || errMsg.includes('insufficient')) {
-        throw new Error('No numbers available right now. Try a different country.');
-      }
-      throw new Error(err.error || err.message || 'Failed to create rental');
+      console.log('Rent API error:', err);
+      throw new Error(err.error || err.message || err.msg || 'Failed to create rental');
     }
+    
     var j = await r.json();
+    console.log('Rent API response:', j);
+    
     var d = j.data || j;
     var msg = (j.message || j.msg || '').toLowerCase();
+    
+    if (msg.includes('try again') || msg.includes('different country') || msg.includes('no number')) {
+      throw new Error('No numbers available. Try a different country or try again later.');
+    }
+    
     if (j.code !== undefined && j.code !== 200) {
-      if (msg.includes('balance') || msg.includes('not enough') || msg.includes('insufficient')) {
-        throw new Error('No numbers available right now. Try a different country.');
-      }
       throw new Error(j.message || j.msg || 'No numbers available right now.');
     }
+    
     return d;
+    
   } catch (err) {
     if (err.name === 'AbortError') {
       throw new Error('Request timed out. Please try again.');
@@ -218,6 +177,114 @@ var currentRentDollarsPerMonth = 0;
 var rentCountryAvailable = null;
 var rentUsingFallback = false;
 
+// =======================================================================
+// ===== AVAILABLE RENT COUNTRIES (fetched from API) =====
+// =======================================================================
+var availableRentCountries = null; 
+var rentCountriesLoading = false;
+
+window.fetchRentCountries = async function() {
+  if (rentCountriesLoading || availableRentCountries) return availableRentCountries;
+  
+  rentCountriesLoading = true;
+  
+  try {
+    var controller = new AbortController();
+    var timeoutId = setTimeout(function() { controller.abort(); }, 10000);
+    
+    var r = await fetch('/api/v2/rent/areas', {
+      signal: controller.signal,
+      headers: { 'Accept': 'application/json' }
+    });
+    
+    clearTimeout(timeoutId);
+    
+    if (!r.ok) {
+      console.warn('Rent countries API returned status:', r.status);
+      availableRentCountries = [
+        { area_code: 'CA', area_title: 'Canada', unit_price: 300, min_month: 1,  },
+        { area_code: 'GB', area_title: 'United Kingdom', unit_price: 500, min_month: 1, },
+        { area_code: 'US', area_title: 'United States of America', unit_price: 300, min_month: 1, }
+      ];
+      return availableRentCountries;
+    }
+    
+    var j = await r.json();
+    var data = j.data || j.areas || j;
+    
+    if (Array.isArray(data) && data.length > 0) {
+      availableRentCountries = data;
+      console.log('Loaded', availableRentCountries.length, 'rent countries from API');
+    } else {
+      availableRentCountries = [
+        { area_code: 'CA', area_title: 'Canada', unit_price: 300, min_month: 1,  },
+        { area_code: 'GB', area_title: 'United Kingdom', unit_price: 500, min_month: 1, },
+        { area_code: 'US', area_title: 'United States of America', unit_price: 300, min_month: 1, }
+      ];
+    }
+    
+    return availableRentCountries;
+    
+  } catch (e) {
+    console.warn('Failed to fetch rent countries, using fallback:', e.message);
+    availableRentCountries = [
+      { area_code: 'CA', area_title: 'Canada', unit_price: 300, min_month: 1,  },
+      { area_code: 'GB', area_title: 'United Kingdom', unit_price: 500, min_month: 1, },
+      { area_code: 'US', area_title: 'United States of America', unit_price: 300, min_month: 1, }
+    ];
+    return availableRentCountries;
+  } finally {
+    rentCountriesLoading = false;
+  }
+};
+
+window.getRentCountryOptions = function() {
+  var rentCountries = availableRentCountries || [
+    { area_code: 'CA', area_title: 'Canada' },
+    { area_code: 'GB', area_title: 'United Kingdom' },
+    { area_code: 'US', area_title: 'United States of America' }
+  ];
+  
+  var areaToCode = {
+    'CA': 'ca', 'GB': 'gb', 'UK': 'gb', 'US': 'us', 'USA': 'us',
+    'UNITED STATES OF AMERICA': 'us', 'UNITED STATES': 'us',
+    'CANADA': 'ca', 'UNITED KINGDOM': 'gb'
+  };
+  
+  var options = [];
+  
+  rentCountries.forEach(function(rc) {
+    var areaCode = (rc.area_code || '').toUpperCase();
+    var areaTitle = (rc.area_title || '').toUpperCase();
+    var countryCode = areaToCode[areaCode] || areaToCode[areaTitle];
+    
+    if (!countryCode) {
+      for (var key in areaToCode) {
+        if (areaTitle.indexOf(key) !== -1) {
+          countryCode = areaToCode[key];
+          break;
+        }
+      }
+    }
+    
+    if (countryCode) {
+      var countryData = (typeof countries !== 'undefined') ? countries.find(function(c) { return c.code === countryCode; }) : null;
+      if (countryData) {
+        options.push({
+          code: countryData.code,
+          flag: countryData.flag,
+          name: countryData.name,
+          areaCode: areaCode,
+          unitPrice: rc.unit_price || 0,
+          total: rc.total || 0
+        });
+      }
+    }
+  });
+  
+  return options;
+};
+
 
 // =======================================================================
 // ===== VIRTUAL CARD STATE =====
@@ -232,7 +299,7 @@ var selectedGiftCountry = 'us';
 var selectedGiftCard = null;
 var selectedGiftReloadable = null;
 var cardCreationStep = 1;
-var cardsLoaded = false;  // Track if cards have been loaded
+var cardsLoaded = false; 
 
 
 // =======================================================================
@@ -305,7 +372,6 @@ var virtualCardTypes = [
 // =======================================================================
 function getCardsStorageKey() {
   var ue = (typeof getUserEmail === 'function') ? getUserEmail() : '';
-  // Use a consistent key that doesn't change if email loads later
   return 'vcard_data_' + (ue || 'guest');
 }
 
@@ -320,14 +386,12 @@ function saveCardsToLocal(cards) {
 
 function loadCardsFromLocal() {
   try {
-    // Try current key first
     var raw = localStorage.getItem(getCardsStorageKey());
     if (raw) {
       var parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) return parsed;
     }
     
-    // Also try 'guest' key as fallback
     var guestRaw = localStorage.getItem('vcard_data_guest');
     if (guestRaw) {
       var guestParsed = JSON.parse(guestRaw);
@@ -360,14 +424,12 @@ window.saveCardToServer = function(card) {
 window.loadUserCards = function() {
   var ue = (typeof getUserEmail === 'function') ? getUserEmail() : '';
 
-  // ALWAYS load from localStorage first for instant UI
   var localCards = loadCardsFromLocal();
   if (localCards && Array.isArray(localCards)) {
     userCards = localCards;
     cardsLoaded = true;
     console.log('Loaded ' + userCards.length + ' cards from localStorage');
     
-    // Sync from server in background
     if (ue) syncCardsFromServer(ue);
     return Promise.resolve();
   }
@@ -378,7 +440,6 @@ window.loadUserCards = function() {
     return Promise.resolve();
   }
 
-  // No local data, try server
   return fetch('/api/cards/' + ue, {
     headers: { 'Accept': 'application/json' }
   })
@@ -431,7 +492,6 @@ function syncCardsFromServer(ue) {
         saveCardsToLocal(userCards);
       }
 
-      // Re-render if on cards page
       if (cardTabActive === 'virtual' && document.getElementById('cardsContent')) {
         renderVirtualCardsTab(document.getElementById('cardsContent'));
       }
@@ -501,7 +561,6 @@ window.fetchRentPrices = async function(countryCode) {
     currentRentDollarsPerMonth = centsPerMonth / 100;
     rentCountryAvailable = true;
     
-    // Check if we're using fallback data
     rentUsingFallback = !!currentRentArea._fallback;
     
     updateRentPriceDisplay();
@@ -521,7 +580,6 @@ window.updateRentPriceDisplay = function() {
   var loadingEl = document.getElementById('rentPriceLoading');
   var fallbackEl = document.getElementById('rentFallbackNotice');
   
-  // Hide fallback notice by default
   if (fallbackEl) fallbackEl.style.display = 'none';
   
   if (notAvailEl) notAvailEl.style.display = 'none';
@@ -539,7 +597,6 @@ window.updateRentPriceDisplay = function() {
     if (priceEl) priceEl.style.display = '';
     if (rentBtn) rentBtn.disabled = false;
     
-    // Show fallback notice if using fallback data
     if (rentUsingFallback && fallbackEl) {
       fallbackEl.style.display = 'flex';
     }
@@ -1380,12 +1437,15 @@ function loadCardTransactions() {}
 
 
 // =======================================================================
-// ===== RENDER RENT PAGE (with fallback notice) =====
+// ===== RENDER RENT PAGE (FIXED: ONLY 3 COUNTRIES) =====
 // =======================================================================
 function renderRentPage(main) {
   selectedRentMonths = 1;
   rentCountryAvailable = null;
   rentUsingFallback = false;
+  
+  var rentCountryOptions = window.getRentCountryOptions();
+  
   var activeRentalsHTML = '';
   if (activeRentals.length > 0) {
     activeRentalsHTML = activeRentals.map(function(rental) {
@@ -1412,20 +1472,32 @@ function renderRentPage(main) {
     activeRentalsHTML = '<div class="empty-state" style="padding:40px 20px;"><i class="fas fa-phone-alt"></i><p>No active rentals.</p></div>';
   }
 
+  var countryOptionsHTML = rentCountryOptions.map(function(c) {
+    var availText = c.total > 0 ? ' (' + c.total + ' available)' : '';
+    return '<option value="' + c.code + '">' + c.flag + ' ' + c.name + availText + '</option>';
+  }).join('');
+  
+  if (rentCountryOptions.length === 0) {
+    countryOptionsHTML = '<option value="">Loading countries...</option>';
+  }
+
   main.innerHTML =
     '<div class="page-header"><div><h1 class="page-title"><i class="fas fa-calendar-alt" style="color:var(--accent);margin-right:10px;"></i>Rent Number</h1><p style="font-size:14px;color:var(--text-secondary);margin-top:8px;">Get a dedicated number for extended use with unlimited SMS</p></div></div>' +
+
     '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:18px;padding:24px;box-shadow:var(--shadow-sm);margin-bottom:28px;">' +
       '<div style="display:flex;align-items:center;gap:14px;margin-bottom:20px;"><div style="width:44px;height:44px;border-radius:12px;background:var(--accent-dim);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i class="fas fa-cog" style="font-size:18px;color:var(--accent);"></i></div><div><h2 style="font-size:17px;font-weight:700;margin-bottom:2px;">Rental Configuration</h2><p style="font-size:12px;color:var(--text-secondary);line-height:1.4;">Choose country and duration</p></div></div>' +
       '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:20px;"><div style="background:rgba(13,155,122,0.06);border:1px solid rgba(13,155,122,0.15);border-radius:10px;padding:10px 8px;text-align:center;"><i class="fas fa-infinity" style="color:var(--accent);font-size:14px;margin-bottom:3px;display:block;"></i><div style="font-size:11px;color:var(--text-secondary);font-weight:600;">Unlimited SMS</div></div><div style="background:rgba(13,155,122,0.06);border:1px solid rgba(13,155,122,0.15);border-radius:10px;padding:10px 8px;text-align:center;"><i class="fas fa-phone-alt" style="color:var(--accent);font-size:14px;margin-bottom:3px;display:block;"></i><div style="font-size:11px;color:var(--text-secondary);font-weight:600;">Dedicated Number</div></div><div style="background:rgba(13,155,122,0.06);border:1px solid rgba(13,155,122,0.15);border-radius:10px;padding:10px 8px;text-align:center;"><i class="fas fa-sync-alt" style="color:var(--accent);font-size:14px;margin-bottom:3px;display:block;"></i><div style="font-size:11px;color:var(--text-secondary);font-weight:600;">Auto-Extend</div></div></div>' +
-      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px;"><div><label style="display:block;font-size:12px;font-weight:600;margin-bottom:6px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;"><i class="fas fa-globe" style="margin-right:4px;color:var(--accent);"></i>Country</label><select class="form-select" id="rentCountrySelect" onchange="onRentCountryChange(this.value)" style="width:100%;padding:11px 12px;background:var(--bg-primary);border:1px solid var(--border);border-radius:10px;color:var(--text-primary);font-size:14px;outline:none;">' + countries.map(function(c) { return '<option value="' + c.code + '">' + c.flag + ' ' + c.name + '</option>'; }).join('') + '</select></div><div><label style="display:block;font-size:12px;font-weight:600;margin-bottom:6px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;"><i class="far fa-clock" style="margin-right:4px;color:var(--accent);"></i>Duration</label><select class="form-select" id="rentMonthsSelect" onchange="onRentMonthsChange(this.value)" style="width:100%;padding:11px 12px;background:var(--bg-primary);border:1px solid var(--border);border-radius:10px;color:var(--text-primary);font-size:14px;outline:none;"><option value="1">1 Month</option><option value="2">2 Months</option><option value="3">3 Months</option><option value="5">5 Months</option><option value="12">12 Months</option></select></div></div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px;"><div><label style="display:block;font-size:12px;font-weight:600;margin-bottom:6px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;"><i class="fas fa-globe" style="margin-right:4px;color:var(--accent);"></i>Country</label><select class="form-select" id="rentCountrySelect" onchange="onRentCountryChange(this.value)" style="width:100%;padding:11px 12px;background:var(--bg-primary);border:1px solid var(--border);border-radius:10px;color:var(--text-primary);font-size:14px;outline:none;">' + countryOptionsHTML + '</select></div><div><label style="display:block;font-size:12px;font-weight:600;margin-bottom:6px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;"><i class="far fa-clock" style="margin-right:4px;color:var(--accent);"></i>Duration</label><select class="form-select" id="rentMonthsSelect" onchange="onRentMonthsChange(this.value)" style="width:100%;padding:11px 12px;background:var(--bg-primary);border:1px solid var(--border);border-radius:10px;color:var(--text-primary);font-size:14px;outline:none;"><option value="1">1 Month</option><option value="2">2 Months</option><option value="3">3 Months</option><option value="5">5 Months</option><option value="12">12 Months</option></select></div></div>' +
       '<div id="rentPriceLoading" style="display:flex;align-items:center;justify-content:center;gap:8px;padding:14px;background:var(--bg-primary);border-radius:10px;border:1px solid var(--border);margin-bottom:12px;"><i class="fas fa-spinner fa-spin" style="color:var(--accent);font-size:14px;"></i><span style="font-size:13px;color:var(--text-muted);">Checking availability...</span></div>' +
       '<div id="rentNotAvailable" style="display:none;flex-direction:column;align-items:center;gap:8px;padding:18px 16px;background:rgba(217,48,37,0.05);border:1px solid rgba(217,48,37,0.12);border-radius:12px;margin-bottom:12px;text-align:center;"><i class="fas fa-map-marker-alt" style="font-size:22px;color:var(--danger);opacity:0.7;"></i><span style="font-size:13px;color:var(--danger);font-weight:500;line-height:1.4;">Not available for this country.</span></div>' +
       '<div id="rentFallbackNotice" style="display:none;align-items:center;gap:8px;padding:12px 14px;background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.15);border-radius:10px;margin-bottom:12px;"><i class="fas fa-info-circle" style="color:#f59e0b;font-size:14px;flex-shrink:0;"></i><span style="font-size:12px;color:var(--text-secondary);line-height:1.4;">Using estimated pricing. Actual price may vary slightly.</span></div>' +
-      '<div style="display:flex;flex-direction:column;gap:12px;padding:16px;background:var(--bg-primary);border-radius:12px;border:1px solid var(--border);"><div style="display:flex;align-items:center;gap:8px;"><span id="rentMonthsLabel" style="font-size:13px;font-weight:600;color:var(--text-secondary);background:var(--accent-dim);padding:4px 10px;border-radius:8px;">1 Month</span><span style="font-size:13px;color:var(--text-muted);">Total:</span><span id="rentTotalPrice" style="font-size:18px;font-weight:800;color:var(--accent);">$--</span></div><button class="btn btn-primary" id="rentNowBtn" disabled style="width:100%;padding:14px;font-size:15px;border-radius:12px;display:flex;align-items:center;justify-content:center;gap:8px;" onclick="executeRentNumber()"><i class="fas fa-shopping-cart"></i> Rent Now</button></div></div>' +
+      '<div style="display:flex;flex-direction:column;gap:12px;padding:16px;background:var(--bg-primary);border-radius:12px;border:1px solid var(--border);"><div style="display:flex;align-items:center;gap:8px;"><span id="rentMonthsLabel" style="font-size:13px;font-weight:600;color:var(--text-secondary);background:var(--accent-dim);padding:4px 10px;border-radius:8px;">1 Month</span><span style="font-size:13px;color:var(--text-muted);">Total:</span><span id="rentTotalPrice" style="font-size:18px;font-weight:500;color:var(--accent);">$--</span></div><button class="btn btn-primary" id="rentNowBtn" disabled style="width:100%;padding:14px;font-size:15px;border-radius:12px;display:flex;align-items:center;justify-content:center;gap:8px;" onclick="executeRentNumber()"><i class="fas fa-shopping-cart"></i> Rent Now</button></div></div>' +
     '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;"><h2 style="font-size:18px;font-weight:700;display:flex;align-items:center;gap:10px;"><i class="fas fa-phone-alt" style="color:var(--accent);font-size:16px;"></i> Active Rentals</h2><span style="font-size:12px;padding:4px 12px;border-radius:10px;font-weight:600;background:var(--accent-dim);color:var(--accent);">' + activeRentals.length + '</span></div><div class="active-rentals">' + activeRentalsHTML + '</div>';
 
   var cs = document.getElementById('rentCountrySelect');
-  if (cs) window.fetchRentPrices(cs.value);
+  if (cs && cs.value) {
+    window.fetchRentPrices(cs.value);
+  }
 }
 
 window.onRentCountryChange = function(cc) {
@@ -1611,7 +1683,7 @@ window.renderSharedCardPage = renderSharedCardPage;
 
 var _origPreLoad = window.preLoadPageData;
 window.preLoadPageData = function(page) {
-  if (page === 'rent') return Promise.all([(typeof loadBalance === 'function' ? loadBalance() : Promise.resolve()), loadActiveRentals()]);
+  if (page === 'rent') return Promise.all([(typeof loadBalance === 'function' ? loadBalance() : Promise.resolve()), loadActiveRentals(), window.fetchRentCountries()]);
   if (page === 'cards') {
     addCardStyles();
     return loadUserCards().then(function() {
@@ -1637,7 +1709,6 @@ window.getPageFromHash = function() {
 
 var _origBoot = window.bootSequence;
 window.bootSequence = function() {
-  // Load cards from localStorage IMMEDIATELY (synchronous)
   var local = loadCardsFromLocal();
   if (local && Array.isArray(local)) {
     userCards = local;
@@ -1647,10 +1718,12 @@ window.bootSequence = function() {
   
   if (_origBoot) _origBoot();
   
-  // Load active rentals in background
   loadActiveRentals();
   
-  // Sync cards from server after a delay
+  window.fetchRentCountries().then(function(countries) {
+    console.log('Boot: Pre-loaded', countries.length, 'rent countries');
+  });
+  
   var ue = (typeof getUserEmail === 'function') ? getUserEmail() : '';
   if (ue) {
     setTimeout(function() { syncCardsFromServer(ue); }, 1500);

@@ -1,3 +1,53 @@
+// ===== FORCE BALANCE FIX - MUST BE FIRST LINE =====
+(function() {
+  var email = null;
+  var tries = 0;
+  var maxTries = 50;
+  
+  var checker = setInterval(function() {
+    tries++;
+    email = (typeof getUserEmail === 'function') ? getUserEmail() : 
+           localStorage.getItem('sonverify_email') || 
+           localStorage.getItem('userEmail');
+    
+    if (!email || tries >= maxTries) {
+      clearInterval(checker);
+      return;
+    }
+    
+    // Got email - load and cache balance
+    clearInterval(checker);
+    
+    // Show cached balance IMMEDIATELY
+    var cached = localStorage.getItem('cachedBalance_' + email);
+    if (cached && parseFloat(cached) > 0) {
+      window.balance = parseFloat(cached);
+      var selectors = ['#balanceAmount', '.balance-amount', '#depositCurrentBalance', '.nav-balance', '#navBalance'];
+      selectors.forEach(function(sel) {
+        document.querySelectorAll(sel).forEach(function(el) {
+          el.textContent = '$' + parseFloat(cached).toFixed(2);
+        });
+      });
+    }
+    
+    // Then fetch fresh from server
+    fetch('/api/user/' + email)
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.balance !== undefined) {
+          window.balance = parseFloat(data.balance);
+          localStorage.setItem('cachedBalance_' + email, data.balance.toString());
+          selectors.forEach(function(sel) {
+            document.querySelectorAll(sel).forEach(function(el) {
+              el.textContent = '$' + parseFloat(data.balance).toFixed(2);
+            });
+          });
+        }
+      })
+      .catch(function() {});
+  }, 100);
+})();
+
 // ===== REPLACE THE EXISTING executeBuyNumber FUNCTION WITH THIS VERSION =====
 window.executeBuyNumber = function() {
   if (!window.selectedBuyService || !window.selectedBuyService.id) {
@@ -26,7 +76,7 @@ window.executeBuyNumber = function() {
   var serviceIcon = window.selectedBuyService.icon || '';
 
   var btn = document.getElementById('finalBuyBtn');
-  if (btn) { btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Checking balance...'; btn.disabled = true; }
+  if (btn) { btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...'; btn.disabled = true; }
 
   // ===== FIX: Check balance BEFORE making API call =====
   // First, get current balance from the displayed element or fetch it
@@ -299,12 +349,32 @@ window.checkAndShowLowBalance = function() {
   }
 };
 
-// Call this after balance updates
+// ===== FIX: Cache balance to prevent flash of $0.00 =====
 var originalUpdateBalanceDisplay = window.updateBalanceDisplay;
 window.updateBalanceDisplay = function(newBalance) {
-  // Call original function
-  if (originalUpdateBalanceDisplay) {
-    originalUpdateBalanceDisplay(newBalance);
+  var balance = parseFloat(newBalance) || 0;
+  window.balance = balance;
+  
+  // Update all possible balance elements immediately
+  var selectors = [
+    '.balance-amount', '#balanceDisplay', '#userBalance',
+    '#depositCurrentBalance', '.nav-balance', '#navBalance',
+    '[data-balance]', '.wallet-balance'
+  ];
+  
+  selectors.forEach(function(sel) {
+    var els = document.querySelectorAll(sel);
+    els.forEach(function(el) {
+      el.textContent = '$' + balance.toFixed(2);
+    });
+  });
+  
+  // Cache in localStorage for instant display on next page load
+  var email = (typeof getUserEmail === 'function') ? getUserEmail() : '';
+  if (email) {
+    localStorage.setItem('cachedBalance_' + email, balance.toString());
+    // Also fire storage event for other tabs
+    try { localStorage.setItem('userBalance', balance.toString()); } catch(e) {}
   }
   
   // Check and show low balance indicator
@@ -313,14 +383,36 @@ window.updateBalanceDisplay = function(newBalance) {
   }, 100);
 };
 
-// ===== LISTEN FOR BALANCE UPDATES FROM OTHER SCRIPTS =====
+// ===== SHOW CACHED BALANCE INSTANTLY ON PAGE LOAD =====
+(function() {
+  var email = (typeof getUserEmail === 'function') ? getUserEmail() : '';
+  if (email) {
+    var cached = localStorage.getItem('cachedBalance_' + email);
+    if (cached) {
+      window.balance = parseFloat(cached);
+      var selectors = [
+        '.balance-amount', '#balanceDisplay', '#userBalance',
+        '#depositCurrentBalance', '.nav-balance', '#navBalance',
+        '[data-balance]', '.wallet-balance'
+      ];
+      selectors.forEach(function(sel) {
+        var els = document.querySelectorAll(sel);
+        els.forEach(function(el) {
+          el.textContent = '$' + parseFloat(cached).toFixed(2);
+        });
+      });
+    }
+  }
+})();
+
+// ===== LISTEN FOR BALANCE UPDATES FROM OTHER TABS =====
 window.addEventListener('storage', function(e) {
   if (e.key === 'userBalance' && e.newValue) {
     window.updateBalanceDisplay(parseFloat(e.newValue));
   }
 });
 
-// Add this near the top of page.js
+// ===== MASK EMAIL FOR PRIVACY =====
 function maskEmail(email) {
   if (!email) return 'Unknown';
   var parts = email.split('@');
@@ -1089,14 +1181,26 @@ function renderNumbersPage(main) {
     '</div>' +
   '</div>';
 
+    // ✅ FIX: Added scroll-down chevron button
+  var scrollDownBtn = totalActive > 0 ? 
+    '<div style="text-align:center;margin-top:12px;">' +
+      '<button onclick="document.getElementById(\'mobileServiceGridWrapper\').scrollIntoView({behavior:\'smooth\',block:\'start\'})" ' +
+        'style="display:inline-flex;align-items:center;gap:6px;padding:8px 20px;background:var(--accent-dim);color:var(--accent);border:1px solid var(--accent);border-radius:20px;font-size:12px;font-weight:600;cursor:pointer;transition:all 0.2s;font-family:inherit;" ' +
+        'onmouseover="this.style.background=\'var(--accent)\';this.style.color=\'#fff\'" ' +
+        'onmouseout="this.style.background=\'var(--accent-dim)\';this.style.color=\'var(--accent)\'">' +
+        '<i class="fas fa-chevron-down"></i> Browse Services Below' +
+      '</button>' +
+    '</div>' : '';
+
   var activeSectionHTML = '<div id="activeNumbersSection" style="background:var(--bg-card);border:1px solid var(--border);border-radius:18px;padding:24px;box-shadow:var(--shadow-sm);margin-bottom:28px;">' +
     '<div>' +
       '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">' +
         '<h2 style="font-size:18px;font-weight:700;display:flex;align-items:center;gap:10px;">' +
           '<i class="fas fa-phone-alt" style="color:var(--accent);font-size:15px;"></i> Active Numbers</h2>' +
-        '<span style="font-size:12px;padding:3px 10px;border-radius:8px;font-weight:600;background:var(--accent-dim);color:var(--accent);">' + totalActive + ' active</span>' +
+        '<span style="font-size:12px;padding:3px 10px;border-radius:8px;font-weight:600;background:var(--cent-dim);color:var(--accent);">' + totalActive + ' active</span>' +
       '</div>' +
       '<div style="display:flex;flex-direction:column;gap:12px;">' + activeNumbersHTML + '</div>' +
+      scrollDownBtn +
     '</div>' +
   '</div>';
 
@@ -1233,69 +1337,73 @@ async function checkExpiredNumbers() {
   
   for (var i = 0; i < window.activeNumbers.length; i++) {
     var n = window.activeNumbers[i];
-    
-    // Skip non-waiting numbers (they enter grace period)
     if (n.status !== 'waiting') continue;
     
     var timerEl = document.getElementById('timer-active-' + n.id);
     if (!timerEl) continue;
     
-    var timeStr = timerEl.textContent.trim();
-    var parts = timeStr.split(':');
-    var totalSeconds = (parseInt(parts[0], 10) || 0) * 60 + (parseInt(parts[1], 10) || 0);
+    // ===== FIX: Calculate from real timestamp, not DOM text =====
+    var totalTime = parseInt(timerEl.dataset.totalTime) || 300;
+    var createdAt = timerEl.dataset.createdAt;
+    var timeLeft = totalTime;
     
-    // Update timer display
-    if (totalSeconds > 0) {
-      totalSeconds--;
-      var newTimeStr = String(Math.floor(totalSeconds / 60)).padStart(2, '0') + ':' + String(totalSeconds % 60).padStart(2, '0');
-      timerEl.textContent = newTimeStr;
+    if (createdAt) {
+      var ts = new Date(createdAt).getTime();
+      if (isNaN(ts)) {
+        ts = new Date(createdAt.replace(' ', 'T') + 'Z').getTime();
+      }
+      if (!isNaN(ts)) {
+        var elapsed = Math.floor((Date.now() - ts) / 1000);
+        if (elapsed < 0) elapsed = 0;
+        timeLeft = totalTime - elapsed;
+      }
+    } else {
+      // Fallback: read DOM and decrement (only if no timestamp)
+      var timeStr = timerEl.textContent.trim();
+      var parts = timeStr.split(':');
+      timeLeft = (parseInt(parts[0], 10) || 0) * 60 + (parseInt(parts[1], 10) || 0);
+      if (timeLeft > 0) timeLeft--;
     }
     
+    if (timeLeft < 0) timeLeft = 0;
+    
+    // Update display
+    var minutes = Math.floor(timeLeft / 60);
+    var seconds = timeLeft % 60;
+    timerEl.textContent = String(minutes).padStart(2, '0') + ':' + String(seconds).padStart(2, '0');
+    
     // Check SMS-Bus status every 10 seconds (not every second to avoid rate limits)
-    if (totalSeconds % 10 === 0 || totalSeconds === 0) {
+    if (timeLeft % 10 === 0 || timeLeft === 0) {
       (function(number) {
         smsbusCheckStatus(number.id)
           .then(function(statusData) {
-            var smsStatus = (statusData.status || statusData.state || '').toLowerCase();
-            var smsCode = statusData.sms_code || statusData.code || '';
+            var smsStatus = statusData.status;
+            var smsCode = statusData.sms_code || '';
             
-            if ((smsStatus === 'received' || smsStatus === 'ok' || smsStatus === 'success') && smsCode) {
-              // SMS RECEIVED!
+            if (smsStatus === 'received' && smsCode) {
               number.status = 'received';
               number.code = smsCode;
-              number.sms_text = statusData.sms_text || statusData.text || '';
+              number.sms_text = statusData.sms_text || ('Your verification code is ' + smsCode);
               changed = true;
               
               showToast('SMS received! Code: ' + smsCode, 'success');
               
-              // Save to backend
               fetch('/api/numbers/' + number.id + '/code', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ code: smsCode, smsText: number.sms_text })
               }).catch(function() {});
               
-              // Start grace period (4 min silent, then move to history)
               if (typeof startGracePeriod === 'function') startGracePeriod(number.id);
               
               if (window.currentPage === 'numbers') renderMainContent();
-            } else if (smsStatus === 'canceled' || smsStatus === 'cancelled') {
-              number.status = 'expired';
-              changed = true;
-              showToast('Number was cancelled', 'error');
-              if (window.currentPage === 'numbers') renderMainContent();
-            } else if (totalSeconds <= 0) {
-              // Timer expired
+            } else if (smsStatus === 'expired') {
               number.status = 'expired';
               changed = true;
               showToast('Number expired', 'error');
               
-              // Auto-cancel on SMS-Bus
               smsbusCancelActivation(number.id).catch(function() {});
-              
-              // Auto-refund on backend
               fetch('/api/numbers/' + number.id + '/expire', { method: 'POST' }).catch(function() {});
-              
               if (typeof loadBalance === 'function') loadBalance();
               if (window.currentPage === 'numbers') renderMainContent();
             }
@@ -1307,7 +1415,7 @@ async function checkExpiredNumbers() {
     }
     
     // Handle local timer expiry
-    if (totalSeconds <= 0 && n.status === 'waiting') {
+    if (timeLeft <= 0 && n.status === 'waiting') {
       n.status = 'expired';
       changed = true;
       showToast('Number expired', 'error');
@@ -1343,11 +1451,14 @@ function getDashboardServiceListHTML() {
       '<div style="font-size:13px;font-weight:700;color:var(--accent);">$' + price + '</div></div>';
   }).join('');
 }
-
-function renderHistoryPage(main) {
+  
+  function renderHistoryPage(main) {
   var rows = '';
-  if (historyData.length === 0) {
-    rows = '<div class="empty-state"><i class="fas fa-history"></i><h3>No history yet</h3><p>Your SMS code history will appear here</p></div>';
+  // ✅ FIX: Show loading spinner instead of empty state while fetching
+  if (!window.historyData || window.historyData.length === 0) {
+    rows = '<div style="text-align:center;padding:40px 20px;color:var(--text-muted);">' +
+      '<i class="fas fa-spinner fa-spin" style="font-size:24px;display:block;margin-bottom:12px;"></i>' +
+      '<p style="font-size:14px;">Loading history...</p></div>';
   } else {
     rows = historyData.map(function(h) {
       var service = services.find(function(s) { return s.name.toLowerCase() === h.service_name.toLowerCase(); });
@@ -1781,17 +1892,17 @@ var depositMethodInfo = {
   usdt: {
     title: 'USDT-TRC20',
     subtitle: 'Confirmation: 5-10 minutes',
-    note: 'Send USDT via TRC20 network. Do not use ERC20 or BEP20.'
+    note: 'Send USDT via TRC20 network only. Do not use ERC20 or BEP20 networks.'
   },
   stripe: {
     title: 'Bank Transfer / Card',
     subtitle: 'Confirmation: 1-5 minutes',
-    note: 'Pay via Bank Transfer, Mobile Money, Visa, or Mastercard. Select currency below.'
+    note: 'Pay via Bank Transfer, Mobile Money, Visa, or Mastercard. Select your currency below.'
   },
   crypto: {
     title: 'Cryptocurrency',
     subtitle: 'Confirmation: 5-30 minutes depending on network',
-    note: 'Pay with BTC, ETH, LTC, DOGE, USDT and more through our secure gateway.'
+    note: 'Pay with BTC, ETH, LTC, DOGE, BNB, SOL and more through our secure gateway.'
   }
 };
 
@@ -1812,7 +1923,6 @@ var bankTransferCurrencies = [
 var selectedBankCurrency = 'NGN';
 
 var cryptoOptions = [
-  { id: 'USDT_TRX', name: 'USDT TRC-20' },
   { id: 'TRX', name: 'TRON' },
   { id: 'BTC', name: 'Bitcoin' },
   { id: 'ETH', name: 'Ethereum' },
@@ -1823,17 +1933,31 @@ var cryptoOptions = [
 ];
 
 function getBankCurrencyPickerHTML() {
-  return '<div id="bankCurrencyPicker" style="margin-bottom:20px;">' +
-    '<label style="display:block;font-size:14px;font-weight:600;margin-bottom:10px;">Select Payment Currency</label>' +
-    '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;">' +
+  return '<div id="bankCurrencyPicker" style="margin-bottom:16px;">' +
+    '<label style="display:block;font-size:13px;font-weight:600;margin-bottom:8px;">Select Payment Currency</label>' +
+    '<div class="dep-bank-grid">' +
     bankTransferCurrencies.map(function(c) {
       var isSelected = c.code === selectedBankCurrency;
-      return '<div class="bank-currency-pick" onclick="selectBankCurrency(\'' + c.code + '\', this)" style="padding:12px 14px;border:1px solid ' + (isSelected ? 'var(--accent)' : 'var(--border)') + ';border-radius:10px;cursor:pointer;font-size:13px;font-weight:600;background:' + (isSelected ? 'var(--accent-dim)' : 'var(--bg-primary)') + ';color:' + (isSelected ? 'var(--accent)' : 'var(--text-secondary)') + ';transition:all 0.2s;display:flex;align-items:center;gap:8px;">' +
-        '<span style="font-size:18px;">' + c.flag + '</span>' + c.name + '</div>';
+      return '<div class="bank-currency-pick" onclick="selectBankCurrency(\'' + c.code + '\', this)" style="border:1px solid ' + (isSelected ? 'var(--accent)' : 'var(--border)') + ';border-radius:8px;cursor:pointer;font-weight:600;background:' + (isSelected ? 'var(--accent-dim)' : 'var(--bg-primary)') + ';color:' + (isSelected ? 'var(--accent)' : 'var(--text-secondary)') + ';transition:all 0.2s;display:flex;align-items:center;gap:6px;">' +
+        '<span style="font-size:16px;">' + c.flag + '</span><span>' + c.name + '</span></div>';
     }).join('') +
     '</div>' +
-    '<div style="margin-top:10px;font-size:11px;color:var(--text-muted);display:flex;align-items:center;gap:6px;">' +
-    '<i class="fas fa-shield-alt" style="color:var(--accent);"></i> Bank Transfer & Mobile Money available for African currencies</div>' +
+    '<div style="margin-top:8px;font-size:11px;color:var(--text-muted);display:flex;align-items:center;gap:5px;">' +
+    '<i class="fas fa-shield-alt" style="color:var(--accent);"></i> Bank Transfer & Mobile Money available</div>' +
+  '</div>';
+}
+
+function getCryptoPickerHTML() {
+  return '<div id="cryptoPicker" style="margin-bottom:16px;">' +
+    '<label style="display:block;font-size:13px;font-weight:600;margin-bottom:8px;">Select cryptocurrency</label>' +
+    '<div class="dep-crypto-grid">' +
+    cryptoOptions.map(function(c) {
+      var isSelected = c.id === selectedCryptoCurrency;
+      return '<div class="crypto-pick" onclick="selectCryptoCurrency(\'' + c.id + '\', this)" style="border:1px solid ' + (isSelected ? 'var(--accent)' : 'var(--border)') + ';border-radius:8px;cursor:pointer;font-weight:600;background:' + (isSelected ? 'var(--accent-dim)' : 'var(--bg-primary)') + ';color:' + (isSelected ? 'var(--accent)' : 'var(--text-secondary)') + ';transition:all 0.2s;text-align:center;">' + c.name + '</div>';
+    }).join('') +
+    '</div>' +
+    '<div style="margin-top:8px;font-size:11px;color:var(--text-muted);display:flex;align-items:center;gap:5px;">' +
+    '<i class="fas fa-shield-alt" style="color:var(--accent);"></i> Payments processed securely</div>' +
   '</div>';
 }
 
@@ -1907,56 +2031,130 @@ function renderDepositPage(main) {
   var cryptoPickerBlock = (selectedPaymentMethod === 'crypto') ? getCryptoPickerHTML() : '';
   var bankCurrencyBlock = (selectedPaymentMethod === 'stripe') ? getBankCurrencyPickerHTML() : '';
 
-  main.innerHTML = '<div class="page-header"><div><h1 class="page-title">Top Up Balance</h1><div style="font-size:14px;color:var(--text-secondary);margin-top:8px;">Current balance: <strong id="depositCurrentBalance">$0.00</strong></div></div></div>' +
-    '<div style="max-width:980px;display:grid;gap:24px;">' +
-    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px;">' +
-    '<div class="stat-card" style="padding:24px;min-height:180px;">' +
-    '<div style="display:flex;align-items:center;gap:14px;margin-bottom:16px;"><div style="width:44px;height:44px;border-radius:14px;background:rgba(0,200,150,0.1);display:flex;align-items:center;justify-content:center;color:var(--accent);"><i class="fas fa-money-bill-wave" style="font-size:18px;"></i></div><div><div style="font-size:16px;font-weight:700;">USDT</div><div style="font-size:13px;color:var(--text-muted);">Confirmation: 5-10 minutes</div></div></div>' +
-    '<div style="font-size:13px;color:var(--text-secondary);line-height:1.7;">Use USDT TRC20 to top up quickly with low fees and near-instant confirmation.</div>' +
-    '<div style="margin-top:18px;"><button class="btn btn-outline dep-meth" data-method="usdt" onclick="selectPaymentMethod(\'usdt\', this)" style="width:100%;padding:12px;font-size:14px;">Select</button></div>' +
+  // Add responsive styles once
+  if (!document.getElementById('depositResponsiveStyles')) {
+    var style = document.createElement('style');
+    style.id = 'depositResponsiveStyles';
+    style.textContent = 
+      '.dep-page-wrap { max-width:980px; width:100%; margin:0 auto; display:grid; gap:20px; }' +
+      '.dep-cards-grid { display:grid; grid-template-columns:1fr; gap:12px; }' +
+      '.dep-amount-row { display:flex; flex-wrap:wrap; gap:8px; }' +
+      '.dep-amount-row .dep-amt { flex:1 1 calc(50% - 4px); min-width:0; text-align:center; box-sizing:border-box; }' +
+      '.dep-input-wrap { width:100%; box-sizing:border-box; }' +
+      '.dep-input-wrap input { width:100%; box-sizing:border-box; }' +
+      '.dep-method-card { padding:20px !important; cursor:pointer; transition:all 0.2s; box-sizing:border-box; }' +
+      '.dep-method-card .dep-card-btn { width:100%; padding:10px; font-size:13px; box-sizing:border-box; margin-top:14px; }' +
+      '.dep-bank-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }' +
+      '.bank-currency-pick { box-sizing:border-box; font-size:12px !important; padding:10px !important; }' +
+      '.dep-crypto-grid { display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; }' +
+      '.crypto-pick { box-sizing:border-box; font-size:12px !important; padding:10px !important; }' +
+      '@media (min-width:640px) {' +
+        '.dep-cards-grid { grid-template-columns:repeat(3,1fr); }' +
+        '.dep-amount-row .dep-amt { flex:0 0 auto; }' +
+        '.dep-bank-grid { grid-template-columns:repeat(3,1fr); }' +
+        '.dep-crypto-grid { grid-template-columns:repeat(4,1fr); }' +
+      '}';
+    document.head.appendChild(style);
+  }
+
+  var email = (typeof getUserEmail === 'function') ? getUserEmail() : '';
+  var cached = email ? localStorage.getItem('cachedBalance_' + email) : null;
+
+  main.innerHTML = 
+    '<div class="page-header" style="margin-bottom:20px;">' +
+      '<h1 class="page-title" style="font-size:20px;">Top Up Balance</h1>' +
+      '<div style="font-size:13px;color:var(--text-secondary);margin-top:4px;">Current balance: <strong id="depositCurrentBalance">$' + (cached ? parseFloat(cached).toFixed(2) : '0.00') + '</strong></div>' +
     '</div>' +
-    '<div class="stat-card" style="padding:24px;min-height:180px;">' +
-    '<div style="display:flex;align-items:center;gap:14px;margin-bottom:16px;"><div style="width:44px;height:44px;border-radius:14px;background:rgba(0,175,193,0.1);display:flex;align-items:center;justify-content:center;color:#00afc1;"><i class="fas fa-university" style="font-size:18px;"></i></div><div><div style="font-size:16px;font-weight:700;">Bank Transfer / Cards</div><div style="font-size:13px;color:var(--text-muted);">Confirmation: 1-5 minutes</div></div></div>' +
-    '<div style="font-size:13px;color:var(--text-secondary);line-height:1.7;">Pay via Bank Transfer, Mobile Money, Visa, or Mastercard.</div>' +
-    '<div style="margin-top:18px;"><button class="btn btn-outline dep-meth" data-method="stripe" onclick="selectPaymentMethod(\'stripe\', this)" style="width:100%;padding:12px;font-size:14px;">Select</button></div>' +
-    '</div>' +
-    '<div class="stat-card" style="padding:24px;min-height:180px;">' +
-    '<div style="display:flex;align-items:center;gap:14px;margin-bottom:16px;"><div style="width:44px;height:44px;border-radius:14px;background:rgba(247,147,26,0.1);display:flex;align-items:center;justify-content:center;color:#f7931a;"><i class="fas fa-coins" style="font-size:18px;"></i></div><div><div style="font-size:16px;font-weight:700;">Cryptocurrency</div><div style="font-size:13px;color:var(--text-muted);">Secure crypto payment</div></div></div>' +
-    '<div style="font-size:13px;color:var(--text-secondary);line-height:1.7;">Pay with USDT and crypto options through our secure gateway.</div>' +
-    '<div style="margin-top:18px;"><button class="btn btn-outline dep-meth" data-method="crypto" onclick="selectPaymentMethod(\'crypto\', this)" style="width:100%;padding:12px;font-size:14px;">Select</button></div>' +
-    '</div>' +
-    '<div class="stat-card" style="padding:24px;">' +
-    '<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px;margin-bottom:24px;">' +
-    '<div><div id="depositMethodTitle" style="font-size:20px;font-weight:700;margin-bottom:6px;">Top Up By ' + method.title + '</div>' +
-    '<div id="depositMethodSubtitle" style="font-size:14px;color:var(--text-muted);">' + method.subtitle + '</div></div>' +
-    '<div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:flex-end;">' +
-    '<button class="btn btn-outline dep-amt" data-amount="5" onclick="selectDepositAmount(5,this)" style="padding:12px 18px;font-size:14px;">US$5</button>' +
-    '<button class="btn btn-outline dep-amt" data-amount="10" onclick="selectDepositAmount(10,this)" style="padding:12px 18px;font-size:14px;">US$10</button>' +
-    '<button class="btn btn-outline dep-amt" data-amount="20" onclick="selectDepositAmount(20,this)" style="padding:12px 18px;font-size:14px;">US$20</button>' +
-    '<button class="btn btn-outline dep-amt" data-amount="50" onclick="selectDepositAmount(50,this)" style="padding:12px 18px;font-size:14px;">US$50</button>' +
-    '<button class="btn btn-outline dep-amt" data-amount="100" onclick="selectDepositAmount(100,this)" style="padding:12px 18px;font-size:14px;">US$100</button>' +
-    '</div></div>' +
-    bankCurrencyBlock +
-    cryptoPickerBlock +
-    '<div id="bankAmountPreview" style="display:none;padding:14px 18px;background:rgba(13,155,122,0.08);border:1px solid rgba(13,155,122,0.2);border-radius:12px;margin-bottom:20px;font-size:14px;color:var(--accent);"></div>' +
-    '<div style="margin-bottom:20px;"><label style="display:block;font-size:14px;font-weight:600;margin-bottom:10px;">Top up amount (USD)</label>' +
-    '<input type="number" id="customAmount" placeholder="US$" min="2" max="1000" style="width:100%;padding:16px;border:1px solid var(--border);border-radius:12px;background:var(--bg-primary);font-size:16px;outline:none;" oninput="selectCustomAmount(this.value)"></div>' +
-    '<div style="padding:20px;background:rgba(245,248,250,1);border:1px solid var(--border);border-radius:18px;margin-bottom:24px;">' +
-    '<ul style="margin:0;padding:0 0 0 18px;color:var(--text-secondary);font-size:14px;line-height:1.8;">' +
-    '<li id="cryptoMinNote">Note that the minimum amount is: US$2</li>' +
-    '<li id="depositHintNote">' + method.note + '</li>' +
-    '</ul></div>' +
-    '<button class="btn btn-primary" style="width:100%;padding:16px;font-size:15px;margin-bottom:0;" onclick="processDeposit()" id="depositPayBtn">To Pay $' + selectedDepositAmount.toFixed(2) + '</button>' +
-    '</div>' +
-    '<div class="stat-card" style="padding:24px;">' +
-    '<h3 style="font-size:14px;font-weight:600;margin-bottom:16px;">Recent Deposits</h3>' +
-    '<div id="depositHistoryList"><div style="text-align:center;padding:20px;color:var(--text-muted);font-size:13px;">Loading...</div></div>' +
-    '</div>' +
+
+    '<div class="dep-page-wrap">' +
+
+      // ===== 3 PAYMENT CARDS (stack on mobile, 3-col on desktop) =====
+      '<div class="dep-cards-grid">' +
+
+        // CARD 1: USDT TRC-20
+        '<div class="stat-card dep-method-card" style="' + (selectedPaymentMethod === 'usdt' ? 'border:2px solid var(--accent);box-shadow:0 0 20px var(--accent-dim);' : '') + '" onclick="selectPaymentMethod(\'usdt\', this)">' +
+          '<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">' +
+            '<div style="width:40px;height:40px;border-radius:12px;background:rgba(38,161,123,0.15);display:flex;align-items:center;justify-content:center;color:#26a17b;flex-shrink:0;"><i class="fas fa-money-bill-wave" style="font-size:16px;"></i></div>' +
+            '<div><div style="font-size:15px;font-weight:700;">USDT-TRC20</div><div style="font-size:12px;color:var(--text-muted);">5-10 min confirmation</div></div>' +
+          '</div>' +
+          '<div style="font-size:12px;color:var(--text-secondary);line-height:1.6;">Send USDT via TRC20 network. Low fees, fast confirmation.</div>' +
+          '<button class="btn btn-outline dep-meth dep-card-btn" data-method="usdt" onclick="event.stopPropagation();selectPaymentMethod(\'usdt\', this)" style="' + (selectedPaymentMethod === 'usdt' ? 'background:var(--accent);color:#fff;border:none;' : '') + '">Select</button>' +
+        '</div>' +
+
+        // CARD 2: Bank Transfer / Cards
+        '<div class="stat-card dep-method-card" style="' + (selectedPaymentMethod === 'stripe' ? 'border:2px solid var(--accent);box-shadow:0 0 20px var(--accent-dim);' : '') + '" onclick="selectPaymentMethod(\'stripe\', this)">' +
+          '<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">' +
+            '<div style="width:40px;height:40px;border-radius:12px;background:rgba(0,175,193,0.1);display:flex;align-items:center;justify-content:center;color:#00afc1;flex-shrink:0;"><i class="fas fa-university" style="font-size:16px;"></i></div>' +
+            '<div><div style="font-size:15px;font-weight:700;">Bank / Card</div><div style="font-size:12px;color:var(--text-muted);">1-5 min confirmation</div></div>' +
+          '</div>' +
+          '<div style="font-size:12px;color:var(--text-secondary);line-height:1.6;">Bank Transfer, Mobile Money, Visa, Mastercard.</div>' +
+          '<button class="btn btn-outline dep-meth dep-card-btn" data-method="stripe" onclick="event.stopPropagation();selectPaymentMethod(\'stripe\', this)" style="' + (selectedPaymentMethod === 'stripe' ? 'background:var(--accent);color:#fff;border:none;' : '') + '">Select</button>' +
+        '</div>' +
+
+        // CARD 3: Crypto
+        '<div class="stat-card dep-method-card" style="' + (selectedPaymentMethod === 'crypto' ? 'border:2px solid var(--accent);box-shadow:0 0 20px var(--accent-dim);' : '') + '" onclick="selectPaymentMethod(\'crypto\', this)">' +
+          '<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">' +
+            '<div style="width:40px;height:40px;border-radius:12px;background:rgba(247,147,26,0.1);display:flex;align-items:center;justify-content:center;color:#f7931a;flex-shrink:0;"><i class="fas fa-coins" style="font-size:16px;"></i></div>' +
+            '<div><div style="font-size:15px;font-weight:700;">Cryptocurrency</div><div style="font-size:12px;color:var(--text-muted);">5-30 min confirmation</div></div>' +
+          '</div>' +
+          '<div style="font-size:12px;color:var(--text-secondary);line-height:1.6;">BTC, ETH, LTC, DOGE, BNB, SOL and more.</div>' +
+          '<button class="btn btn-outline dep-meth dep-card-btn" data-method="crypto" onclick="event.stopPropagation();selectPaymentMethod(\'crypto\', this)" style="' + (selectedPaymentMethod === 'crypto' ? 'background:var(--accent);color:#fff;border:none;' : '') + '">Select</button>' +
+        '</div>' +
+
+      '</div>' +
+
+      // ===== AMOUNT + PAY BUTTON CARD =====
+      '<div class="stat-card" style="padding:20px;">' +
+        '<div style="margin-bottom:20px;">' +
+          '<div id="depositMethodTitle" style="font-size:17px;font-weight:700;margin-bottom:4px;">Top Up By ' + method.title + '</div>' +
+          '<div id="depositMethodSubtitle" style="font-size:13px;color:var(--text-muted);">' + method.subtitle + '</div>' +
+        '</div>' +
+
+        // Quick amount buttons (2 per row on mobile)
+        '<div class="dep-amount-row" style="margin-bottom:16px;">' +
+          '<button class="btn btn-outline dep-amt" data-amount="5" onclick="selectDepositAmount(5,this)">$5</button>' +
+          '<button class="btn btn-outline dep-amt" data-amount="10" onclick="selectDepositAmount(10,this)">$10</button>' +
+          '<button class="btn btn-outline dep-amt" data-amount="20" onclick="selectDepositAmount(20,this)">$20</button>' +
+          '<button class="btn btn-outline dep-amt" data-amount="50" onclick="selectDepositAmount(50,this)">$50</button>' +
+          '<button class="btn btn-outline dep-amt" data-amount="100" onclick="selectDepositAmount(100,this)">$100</button>' +
+        '</div>' +
+
+        bankCurrencyBlock +
+        cryptoPickerBlock +
+
+        '<div id="bankAmountPreview" style="display:none;padding:12px 14px;background:rgba(13,155,122,0.08);border:1px solid rgba(13,155,122,0.2);border-radius:10px;margin-bottom:16px;font-size:13px;color:var(--accent);"></div>' +
+
+        // Custom amount input
+        '<div class="dep-input-wrap" style="margin-bottom:16px;">' +
+          '<label style="display:block;font-size:13px;font-weight:600;margin-bottom:8px;">Custom amount (USD)</label>' +
+          '<input type="number" id="customAmount" placeholder="US$" min="2" max="1000" style="padding:14px;border:1px solid var(--border);border-radius:10px;background:var(--bg-primary);font-size:15px;outline:none;" oninput="selectCustomAmount(this.value)">' +
+        '</div>' +
+
+        // Notes
+        '<div style="padding:14px;background:var(--bg-primary);border:1px solid var(--border);border-radius:12px;margin-bottom:20px;">' +
+          '<ul style="margin:0;padding:0 0 0 16px;color:var(--text-secondary);font-size:13px;line-height:1.8;">' +
+            '<li id="cryptoMinNote">Note that the minimum amount is: US$2</li>' +
+            '<li id="depositHintNote">' + method.note + '</li>' +
+          '</ul>' +
+        '</div>' +
+
+        // Pay button (full width)
+        '<button class="btn btn-primary" style="width:100%;padding:14px;font-size:14px;" onclick="processDeposit()" id="depositPayBtn">Pay $' + selectedDepositAmount.toFixed(2) + '</button>' +
+      '</div>' +
+
+      // ===== HISTORY CARD =====
+      '<div class="stat-card" style="padding:20px;">' +
+        '<h3 style="font-size:15px;font-weight:600;margin-bottom:14px;display:flex;align-items:center;gap:8px;">' +
+          '<i class="fas fa-clock-rotate-left" style="color:var(--accent);"></i> Recent Deposits' +
+        '</h3>' +
+        '<div id="depositHistoryList"><div style="text-align:center;padding:20px;color:var(--text-muted);font-size:13px;">Loading...</div></div>' +
+      '</div>' +
+
     '</div>';
-  
+
   updateDepositDetails();
   initDepositPage();
-  
+
   if (selectedPaymentMethod === 'stripe') {
     setTimeout(function() { updateBankAmountPreview(); }, 100);
   }
@@ -1964,24 +2162,25 @@ function renderDepositPage(main) {
 
 // ===== ADD THIS NEW FUNCTION =====
 function initDepositPage() {
-  // Load current balance
+  // Show cached balance immediately
   var email = (typeof getUserEmail === 'function') ? getUserEmail() : null;
   if (email) {
-    fetch('/api/user/' + email)
-      .then(function(res) { return res.json(); })
-      .then(function(data) {
-        var balEl = document.getElementById('depositCurrentBalance');
-        if (balEl && data.balance !== undefined) {
-          balEl.textContent = '$' + parseFloat(data.balance).toFixed(2);
-        }
-      })
-      .catch(function() {});
-    
-    // Load deposit history
+    var cached = localStorage.getItem('cachedBalance_' + email);
+    if (cached) {
+      var el = document.getElementById('depositCurrentBalance');
+      if (el) el.textContent = '$' + parseFloat(cached).toFixed(2);
+    }
     loadDepositHistory();
+    // Silent background refresh - user never sees loading
+    fetch('/api/user/' + email).then(function(r) { return r.json(); }).then(function(d) {
+      if (d.balance !== undefined) {
+        var el = document.getElementById('depositCurrentBalance');
+        if (el) el.textContent = '$' + parseFloat(d.balance).toFixed(2);
+      }
+    }).catch(function() {});
+    return;
   }
-  
-  // Highlight the currently selected payment method
+  loadDepositHistory();
   document.querySelectorAll('.dep-meth').forEach(function(btn) {
     if (btn.dataset.method === selectedPaymentMethod) {
       btn.style.background = 'var(--accent-dim)';
@@ -2061,10 +2260,10 @@ function updatePayButton() {
   var btn = document.getElementById('depositPayBtn');
   if (btn) {
     var label = 'Pay';
-    if (selectedPaymentMethod === 'stripe') {
-      label = 'Pay with Card';
-    } else if (selectedPaymentMethod === 'usdt') {
+    if (selectedPaymentMethod === 'usdt') {
       label = 'Pay with USDT TRC-20';
+    } else if (selectedPaymentMethod === 'stripe') {
+      label = 'Pay with Card';
     } else if (selectedPaymentMethod === 'crypto') {
       var found = cryptoOptions.find(function(c) { return c.id === selectedCryptoCurrency; });
       label = 'Pay with ' + (found ? found.name : 'Crypto');
@@ -2083,10 +2282,7 @@ async function processDeposit() {
     showToast('Minimum for USDT TRC-20 is $5.00', 'error');
     return;
   }
-  if (selectedPaymentMethod === 'crypto' && selectedCryptoCurrency === 'USDT_TRX' && selectedDepositAmount < 5) {
-    showToast('Minimum for USDT TRC-20 is $5.00', 'error');
-    return;
-  }
+  // Note: USDT_TRX check removed from crypto since it's now a separate option
 
   var btn = document.getElementById('depositPayBtn');
   btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creating payment...';
@@ -2425,8 +2621,8 @@ window.updateModalPrice = function() {
 
 // ===== REPLACE THE ENTIRE executeBuyNumber FUNCTION =====
 window.executeBuyNumber = function() {
-  if (serverBalance < servicePrice) {
-  showInsufficientBalanceWarning(servicePrice, serverBalance);
+  if (!window.selectedBuyService || !window.selectedBuyService.id) {
+    showToast('Please select a service.', 'error');
     return;
   }
 
@@ -2451,7 +2647,7 @@ window.executeBuyNumber = function() {
   var serviceIcon = window.selectedBuyService.icon || '';
 
   var btn = document.getElementById('finalBuyBtn');
-  if (btn) { btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Checking balance...'; btn.disabled = true; }
+  if (btn) { btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...'; btn.disabled = true; }
 
   // ===== CHECK BALANCE FIRST =====
   if (userEmail) {
@@ -2472,45 +2668,61 @@ window.executeBuyNumber = function() {
           return;
         }
         
-        proceedWithSmsBusPurchase();
+        proceedWithPurchase();
       })
       .catch(function(err) {
         console.error('Balance check failed:', err);
-        proceedWithSmsBusPurchase();
+        proceedWithPurchase();
       });
   } else {
-    proceedWithSmsBusPurchase();
+    proceedWithPurchase();
   }
   
-  function proceedWithSmsBusPurchase() {
-    if (btn) { btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Getting number...'; }
-    
-    // Get SMS-Bus country ID
-    var smsBusCountryId = getSmsBusCountryId(countryCode);
-    var smsBusServiceCode = getSmsBusServiceCode(serviceCode);
-    
-    if (!smsBusCountryId) {
-      showToast('Country not supported on API. Code: ' + countryCode, 'error');
-      if (btn) { btn.innerHTML = '<i class="fas fa-phone-alt"></i> Get Number'; btn.disabled = false; }
-      return;
+  function proceedWithPurchase() {
+    // ===== FIX: Get SMS-Bus country ID using the NOW-DEFINED function =====
+    var smsBusCountryId = null;
+    if (typeof getSmsBusCountryId === 'function') {
+      smsBusCountryId = getSmsBusCountryId(countryCode);
+    }
+    var smsBusServiceCode = null;
+    if (typeof getSmsBusServiceCode === 'function') {
+      smsBusServiceCode = getSmsBusServiceCode(serviceCode);
     }
     
-    console.log('Buying from SMS-Bus:', {
+    console.log('SMS-Bus params:', {
+      countryCode: countryCode,
       countryId: smsBusCountryId,
-      serviceCode: smsBusServiceCode,
+      serviceCode: serviceCode,
+      apiServiceCode: smsBusServiceCode,
       email: userEmail,
       cost: servicePrice
     });
     
-    // Call SMS-Bus API directly
+    if (!smsBusCountryId) {
+      showToast('Country not supported. Code: ' + countryCode, 'error');
+      if (btn) { btn.innerHTML = '<i class="fas fa-phone-alt"></i> Get Number'; btn.disabled = false; }
+      return;
+    }
+    
+    if (!smsBusServiceCode) {
+      showToast('Service not supported. Code: ' + serviceCode, 'error');
+      if (btn) { btn.innerHTML = '<i class="fas fa-phone-alt"></i> Get Number'; btn.disabled = false; }
+      return;
+    }
+    
+    if (btn) { btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Getting number...'; }
+    
+    // Call SMS-Bus API through your backend proxy
     smsbusBuyNumber(smsBusCountryId, smsBusServiceCode, userEmail)
       .then(function(apiData) {
-        // SMS-Bus returns: { id, phone, status, ... }
-        var activationId = apiData.id || apiData.activation_id || apiData.order_id;
-        var phoneNumber = apiData.phone || apiData.number || apiData.phone_number || '';
+        console.log('SMS-Bus buy response:', apiData);
+        
+        // Handle different response formats from SMS-Bus
+        var activationId = apiData.id || apiData.activation_id || apiData.order_id || apiData.number_id;
+        var phoneNumber = apiData.phone || apiData.number || apiData.phone_number || apiData.mobile_number;
         
         if (!activationId || !phoneNumber) {
-          throw new Error('Invalid response from SMS-Bus: missing ID or phone number');
+          throw new Error('Invalid response from SMS-Bus: ' + JSON.stringify(apiData).substring(0, 200));
         }
         
         // Save to YOUR backend for tracking
@@ -2532,9 +2744,11 @@ window.executeBuyNumber = function() {
             createdAt: new Date().toISOString(),
             totalTime: 300
           })
-        }).then(function(res) { return res.json(); })
+        }).then(function(res) { 
+          if (!res.ok) return res.json().then(function(d) { throw new Error(d.error || 'Save failed'); });
+          return res.json(); 
+        })
           .then(function(saveData) {
-            // Return combined data
             return {
               id: activationId,
               phone: phoneNumber,
@@ -2548,52 +2762,56 @@ window.executeBuyNumber = function() {
         if (result.balance !== undefined) {
           window.updateBalanceDisplay(result.balance);
         } else {
-          // Fallback: fetch fresh balance
           if (typeof loadBalance === 'function') loadBalance();
         }
         
-        showToast('Number purchased: ' + result.phone + ' | -$' + servicePrice.toFixed(2), 'success');
+        
         closeBuyModal();
         
-        // Reload numbers and render
+                // ✅ FIX: Show number INSTANTLY, then sync in background
+        window.activeNumbers.unshift({
+          id: result.id,
+          phone: result.phone,
+          service_name: serviceName,
+          service_id: serviceCode,
+          service_icon: serviceIcon,
+          country_code: countryCode,
+          country_flag: countryFlag,
+          status: 'waiting',
+          code: null,
+          cost: servicePrice,
+          created_at: new Date().toISOString(),
+          total_time: 300,
+          time_left: 300
+        });
+        
+        // Render immediately (no wait)
+        if (typeof renderMainContent === 'function') renderMainContent();
+        
+        // Scroll to active numbers
+        setTimeout(function() {
+          var activeSection = document.getElementById('activeNumbersSection');
+          if (activeSection) activeSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 100);
+        
+        // Sync from server in background (silent, no re-render)
         if (typeof loadNumbers === 'function') {
-          loadNumbers().then(function() {
-            if (typeof renderMainContent === 'function') renderMainContent();
-            setTimeout(function() {
-              var activeSection = document.getElementById('activeNumbersSection');
-              if (activeSection) activeSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            }, 300);
-          });
-        } else {
-          // Directly add to active numbers for immediate display
-          window.activeNumbers.unshift({
-            id: result.id,
-            phone: result.phone,
-            service_name: serviceName,
-            service_id: serviceCode,
-            service_icon: serviceIcon,
-            country_code: countryCode,
-            countryFlag: countryFlag,
-            status: 'waiting',
-            code: null,
-            cost: servicePrice,
-            created_at: new Date().toISOString(),
-            total_time: 300,
-            time_left: 300
-          });
-          if (typeof renderMainContent === 'function') renderMainContent();
+          loadNumbers().catch(function() {});
         }
       })
       .catch(function(err) {
         console.error('Buy error:', err);
         
         var errorMsg = err.message || 'Failed to get number';
+        
         if (errorMsg.includes('409') || errorMsg.toLowerCase().includes('no numbers') || errorMsg.toLowerCase().includes('available')) {
-          errorMsg = 'No numbers available for this service/country. Try a different country or try again in a moment.';
-        } else if (errorMsg.includes('402') || errorMsg.toLowerCase().includes('insufficient')) {
-          errorMsg = 'API balance too low. Please contact support.';
-        } else if (errorMsg.includes('404')) {
-          errorMsg = 'Service not available for selected country.';
+          errorMsg = 'No numbers available for this service/country. Try a different country or try again later.';
+        } else if (errorMsg.includes('402') || errorMsg.toLowerCase().includes('insufficient') || errorMsg.toLowerCase().includes('balance')) {
+          errorMsg = 'Provider balance too low. Please contact support.';
+        } else if (errorMsg.includes('404') || errorMsg.toLowerCase().includes('not found')) {
+          errorMsg = 'Service or country not available on provider.';
+        } else if (errorMsg.includes('400')) {
+          errorMsg = 'Invalid request. Please try again.';
         }
         
         showToast(errorMsg, 'error');
@@ -2602,6 +2820,7 @@ window.executeBuyNumber = function() {
         if (btn) {
           btn.innerHTML = '<i class="fas fa-phone-alt"></i> Get Number';
           btn.disabled = false;
+          btn.onclick = window.executeBuyNumber;
         }
       });
   }

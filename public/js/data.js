@@ -1,4 +1,4 @@
-// ====== FIX: CLEAR STALE PRICE CACHE ======
+//====== FIX: CLEAR STALE PRICE CACHE ======
 // Add this right after the priceCache declaration (around line 30)
 
 // Force clear cache if older than 1 hour (prevents stale prices)
@@ -79,47 +79,6 @@ try {
   if (_savedCache) Object.assign(priceCache, JSON.parse(_savedCache));
 } catch(e) {}
 
-function fetchPricesForCountry(countryCode) {
-  var countryId = countryIdMap[countryCode];
-  if (!countryId) {
-    console.warn('No country ID for:', countryCode);
-    return Promise.resolve(null);
-  }
-  
-  // ALWAYS fetch fresh prices (don't use cache for this call)
-  // Cache is only used for display, not for purchases
-  return fetch(SMS_API_BASE + '/prices?token=' + SMS_API_TOKEN + '&country_id=' + countryId)
-    .then(function(res) { return res.json(); })
-    .then(function(json) {
-      if (json.code !== 200) {
-        console.error('Price API error:', json);
-        return null;
-      }
-      
-      var prices = {};
-      var rawPrices = {};
-      
-      for (var key in json.data) {
-        var item = json.data[key];
-        rawPrices[item.project_code] = item.cost;  // Store raw cost for debugging
-        prices[item.project_code] = addProfit(item.cost);  // Apply profit
-      }
-      
-      console.log('Prices for', countryCode, '- Raw:', rawPrices, '- With profit:', prices);
-      
-      priceCache[countryCode] = prices;
-      try { 
-        localStorage.setItem('priceCache', JSON.stringify(priceCache)); 
-        localStorage.setItem('priceCacheAge', Date.now().toString());
-      } catch(e) {}
-      
-      return prices;
-    })
-    .catch(function(e) { 
-      console.error('Price fetch failed:', countryCode, e); 
-      return null; 
-    });
-}
 
 function getServicePrice(service, countryCode) {
   var cached = priceCache[countryCode];
@@ -545,92 +504,161 @@ var SMS_API_PRICES = '/api/v2/prices';
 // Token is now only used server-side - remove from frontend for security
 // var SMS_API_TOKEN = 'd4a7951968ed4e59a647a0ac1d1af637'; // ❌ REMOVE THIS - security risk!
 
-// ===== BUY A NUMBER =====
-function smsbusBuyNumber(countryId, serviceCode, userEmail) {
-  return fetch(SMS_API_BUY, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      country_id: countryId,
-      service_code: serviceCode,
-      email: userEmail
+// ===== BUY A NUMBER (CORRECTED) =====
+function smsbusBuyNumber(countryId, projectId, userEmail) {
+  var url = '/api/v2/buy' +
+    '?country_id=' + encodeURIComponent(countryId) +
+    '&project_id=' + encodeURIComponent(projectId);
+  
+  if (userEmail) {
+    url += '&email=' + encodeURIComponent(userEmail);
+  }
+  
+  console.log('[BUY] Fetching:', url);
+  
+  return fetch(url, { method: 'GET' })
+    .then(function(res) {
+      if (!res.ok) {
+        return res.text().then(function(text) {
+          throw new Error('API Error ' + res.status + ': ' + text.substring(0, 200));
+        });
+      }
+      return res.json();
     })
-  })
-  .then(function(res) { 
-    if (!res.ok) {
-      return res.json().then(function(err) {
-        throw new Error(err.error || err.msg || 'API Error: ' + res.status);
-      }).catch(function() {
-        throw new Error('Network error: ' + res.status);
-      });
-    }
-    return res.json(); 
-  })
-  .then(function(json) {
-    console.log('SMS-Bus buy response:', json);
-    
-    // Handle different response formats
-    var data = json.data || json;
-    var code = json.code;
-    
-    // Success codes: 200, 0, 1
-    if (code !== undefined && code !== 200 && code !== 0 && code !== 1) {
-      var errorMsg = json.msg || json.message || json.error || 'API Error: ' + code;
-      if (code === 400) errorMsg = 'Invalid request parameters';
-      if (code === 402) errorMsg = 'Insufficient funds on API account';
-      if (code === 404) errorMsg = 'Service or country not available';
-      if (code === 409) errorMsg = 'No numbers available, try again';
-      throw new Error(errorMsg);
-    }
-    
-    return data;
-  });
+    .then(function(json) {
+      console.log('[BUY] Response:', JSON.stringify(json).substring(0, 300));
+      
+      if (json.code !== 200) {
+        var errorMsg = json.message || 'Unknown error';
+        if (json.code === 50002) errorMsg = 'No numbers available. Try a different country.';
+        if (json.code === 50201) errorMsg = 'Provider balance too low. Contact support.';
+        if (json.code === 401) errorMsg = 'Invalid API key.';
+        throw new Error(errorMsg);
+      }
+      
+      if (!json.data || !json.data.request_id || !json.data.number) {
+        throw new Error('Invalid response: missing request_id or number');
+      }
+      
+      return {
+        id: String(json.data.request_id),
+        phone: json.data.number
+      };
+    });
 }
 
-// ===== CHECK SMS STATUS =====
-function smsbusCheckStatus(activationId) {
-  return fetch(SMS_API_STATUS, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      id: activationId
+// ===== CHECK SMS STATUS (CORRECTED) =====
+function smsbusCheckStatus(requestId) {
+  var url = '/api/v2/status?request_id=' + encodeURIComponent(requestId);
+  
+  return fetch(url, { method: 'GET' })
+    .then(function(res) {
+      if (!res.ok) throw new Error('Status check failed: ' + res.status);
+      return res.json();
     })
-  })
-  .then(function(res) { 
-    if (!res.ok) throw new Error('Status check failed: ' + res.status);
-    return res.json(); 
-  })
-  .then(function(json) {
-    var data = json.data || json;
-    if (json.code !== undefined && json.code !== 200 && json.code !== 0) {
-      console.warn('Status check warning:', json.msg || json.message);
-    }
-    return data;
-  });
+    .then(function(json) {
+      var data = json.data || json;
+      
+      // Success - got SMS code
+      if (json.code === 200 && data && typeof data === 'string' && data.length > 0) {
+        return {
+          status: 'received',
+          sms_code: data,
+          sms_text: 'Your verification code is ' + data
+        };
+      }
+      
+      // Still waiting
+      if (json.code === 50101) {
+        return { status: 'waiting', waiting: true };
+      }
+      
+      // Expired
+      if (json.code === 50102) {
+        return { status: 'expired', waiting: false };
+      }
+      
+      // Other - still waiting
+      return { status: 'waiting', waiting: true };
+    });
 }
 
-// ===== CANCEL ACTIVATION =====
-function smsbusCancelActivation(activationId) {
-  return fetch(SMS_API_CANCEL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      id: activationId
+// ===== CANCEL ACTIVATION (CORRECTED) =====
+function smsbusCancelActivation(requestId) {
+  var url = '/api/v2/cancel?request_id=' + encodeURIComponent(requestId);
+  
+  return fetch(url, { method: 'GET' })
+    .then(function(res) {
+      if (!res.ok) throw new Error('Cancel failed: ' + res.status);
+      return res.json();
     })
-  })
-  .then(function(res) { 
-    if (!res.ok) throw new Error('Cancel failed: ' + res.status);
-    return res.json(); 
-  })
-  .then(function(json) {
-    if (json.code !== undefined && json.code !== 200 && json.code !== 0) {
-      throw new Error(json.msg || json.message || 'Cancel failed');
-    }
-    return json.data || json;
-  });
+    .then(function(json) {
+      if (json.code === 200) {
+        return { success: true };
+      }
+      throw new Error(json.message || 'Cancel failed');
+    });
 }
 
 // ===== FETCH PRICES FOR COUNTRY =====
+// ===== ADD THIS AFTER priceCache declaration =====
+var providerServiceMap = null; // Will hold: { "1": "tg", "2": "pp", ... }
+var serviceMapLoading = false;
+var serviceMapPromise = null;
+
+// Build mapping from provider's numeric ID to service code
+async function buildProviderServiceMap() {
+  if (providerServiceMap) return providerServiceMap;
+  if (serviceMapLoading) return serviceMapPromise;
+  
+  serviceMapLoading = true;
+  serviceMapPromise = fetch('/api/v2/services')
+    .then(function(res) {
+      if (!res.ok) throw new Error('Failed to fetch services');
+      return res.json();
+    })
+    .then(function(json) {
+      var map = {};
+      var rawData = json.data || json;
+      
+      if (typeof rawData === 'object' && rawData !== null) {
+        for (var numericId in rawData) {
+          if (rawData.hasOwnProperty(numericId)) {
+            var service = rawData[numericId];
+            var code = service.code || '';
+            if (code && numericId) {
+              map[numericId] = code.toLowerCase();
+            }
+          }
+        }
+      }
+      
+      for (var id in knownServiceIdMap) {
+        if (!map[id]) {
+          map[id] = knownServiceIdMap[id];
+        }
+      }
+      
+      providerServiceMap = map;
+      console.log('✅ Built provider service map:', Object.keys(map).length, 'services');
+      return map;
+    })
+    .catch(function(err) {
+     console.warn('Failed to build service map, using hardcoded:', err ? err.message : 'Unknown error');
+     providerServiceMap = knownServiceIdMap;
+     return knownServiceIdMap;
+    })
+    .finally(function() {
+      serviceMapLoading = false;
+    });
+  
+  return serviceMapPromise;
+}
+
+// Call this on page load
+buildProviderServiceMap();
+
+// ===== REPLACE fetchPricesForCountry WITH THIS VERSION =====
 function fetchPricesForCountry(countryCode) {
   var countryId = countryIdMap[countryCode];
   if (!countryId) {
@@ -638,92 +666,535 @@ function fetchPricesForCountry(countryCode) {
     return Promise.resolve(null);
   }
   
-  // ✅ FIX: Call YOUR backend, not sms-bus.com directly
-  return fetch(SMS_API_PRICES + '?country_id=' + countryId)
-    .then(function(res) { 
-      if (!res.ok) throw new Error('Price fetch failed: ' + res.status);
-      return res.json(); 
-    })
-    .then(function(json) {
-      if (json.code !== undefined && json.code !== 200) {
-        console.error('Price API error:', json);
-        return null;
-      }
-      
-      var rawData = json.data || json;
-      var prices = {};
-      var rawPrices = {};
-      
-      // Handle both array and object formats
-      var items = Array.isArray(rawData) ? rawData : Object.values(rawData);
-      
-      for (var i = 0; i < items.length; i++) {
-        var item = items[i];
-        var projectCode = item.project_code || item.service_code || item.id;
-        rawPrices[projectCode] = item.cost || item.price || 0;
-        prices[projectCode] = addProfit(rawPrices[projectCode]);
-      }
-      
-      console.log('Prices for', countryCode, '- Raw:', rawPrices, '- With profit:', prices);
-      
-      priceCache[countryCode] = prices;
-      try { 
-        localStorage.setItem('priceCache', JSON.stringify(priceCache)); 
-        localStorage.setItem('priceCacheAge', Date.now().toString());
-      } catch(e) {}
-      
-      return prices;
-    })
-    .catch(function(e) { 
-      console.error('Price fetch failed:', countryCode, e); 
-      return null; 
-    });
+  // First ensure we have the service map
+  return buildProviderServiceMap().then(function(serviceMap) {
+    return fetch(SMS_API_PRICES + '?country_id=' + countryId)
+      .then(function(res) { 
+        if (!res.ok) throw new Error('Price fetch failed: ' + res.status);
+        return res.json(); 
+      })
+      .then(function(json) {
+        if (json.code !== undefined && json.code !== 200) {
+          console.error('Price API error:', json);
+          return null;
+        }
+        
+        var rawData = json.data || json;
+        var prices = {};
+        
+        if (typeof rawData === 'object' && rawData !== null) {
+          // Provider returns: {"1": {"cost": 15.00}, "2": {"cost": 10.50}, ...}
+          // We need to map numeric IDs to service codes
+          
+          for (var numericId in rawData) {
+            if (rawData.hasOwnProperty(numericId)) {
+              var cost = rawData[numericId].cost || rawData[numericId].price || 0;
+              
+              // Map numeric ID to service code using the dynamic map
+              var serviceCode = serviceMap[numericId];
+              
+              if (serviceCode) {
+                // Store with the service code as key
+                prices[serviceCode] = addProfit(cost);
+              }
+              
+              // Always store with numeric ID too for direct lookups
+              prices[numericId] = addProfit(cost);
+            }
+          }
+        }
+        
+        // Add fallback prices for services not in API response
+        // (services that exist in your list but not in provider's price list)
+        services.forEach(function(service) {
+          if (service.price && !prices[service.id]) {
+            var country = countries.find(function(c) { return c.code === countryCode; });
+            var multiplier = country ? (country.basePrice / 0.50) : 1;
+            prices[service.id] = addProfit(service.price * multiplier);
+          }
+        });
+        
+        priceCache[countryCode] = prices;
+        try { 
+          localStorage.setItem('priceCache', JSON.stringify(priceCache)); 
+          localStorage.setItem('priceCacheAge', Date.now().toString());
+        } catch(e) {}
+        
+        return prices;
+      })
+      .catch(function(e) { 
+        console.error('Price fetch failed:', countryCode, e); 
+        // Return fallback prices from cache or hardcoded
+        var fallbackPrices = priceCache[countryCode] || {};
+        services.forEach(function(service) {
+          if (!fallbackPrices[service.id] && service.price) {
+            var country = countries.find(function(c) { return c.code === countryCode; });
+            var multiplier = country ? (country.basePrice / 0.50) : 1;
+            fallbackPrices[service.id] = addProfit(service.price * multiplier);
+          }
+        });
+        return fallbackPrices;
+      });
+  });
 }
 
-// ===== GET SMS-BUS COUNTRY ID FROM CODE =====
-function getSmsBusCountryId(code) {
-  return countryIdMap[code] || null;
-}
 
 // ===== GET SMS-BUS SERVICE CODE (some services have different codes on API) =====
+// ===== GET SMS-BUS SERVICE CODE (maps your service IDs to provider's actual codes) =====
 var smsBusServiceCodeMap = {
-  'wa': 'wa',
-  'fb': 'fb',
-  'tg': 'tg',
-  'ig': 'ig',
-  'tk': 'tk',
-  'X': 'tw',
-  'twitter': 'tw',
-  'vk': 'vk',
-  'linkedin': 'li',
-  'snapchat': 'sc',
-  'tinder': 'td',
-  'bumble': 'bm',
-  'hinge': 'hg',
-  'google': 'go',
-  'apple': 'ap',
-  'microsoft': 'ms',
-  'amazon': 'az',
-  'steam': 'st',
-  'discord': 'dc',
-  'uber': 'ub',
-  'paypal': 'pp',
-  'netflix': 'nf',
-  'openai': 'ai',
-  'signal': 'sg',
-  'line': 'ln',
-  'viber': 'vb',
-  'telegram': 'tg',
-  'whatsapp': 'wa',
-  'facebook': 'fb',
-  'instagram': 'ig',
-  'tiktok': 'tk'
+  // ===== SOCIAL MEDIA (verified from provider API) =====
+  'wa': 'wa',              // WhatsApp
+  'fb': 'fb',              // Facebook
+  'tg': 'tg',              // Telegram
+  'ig': 'ig',              // Instagram+Threads
+  'tk': 'tk',              // TikTok/Douyin
+  'vk': 'vk',              // VKontakte
+  'X': 'tw',               // Twitter/X (your ID is 'X', provider code is 'tw')
+  'twitter': 'tw',          // Twitter/X
+  'linkedin': 'linkedin',   // LinkedIn
+  'snapchat': 'snapchat',   // Snapchat
+  'tinder': 'tinder',       // Tinder
+  'bumble': 'bumble',       // Bumble
+  'hinge': 'hinge',         // Hinge
+  'okcupid': 'okcupid',     // OkCupid
+  'match': 'match',         // Match
+  'zoosk': 'zoosk',         // Zoosk
+  'happn': 'happn',         // Happn
+  'badoo': 'badoo',         // Badoo
+  'scruff': 'scruff',       // Scruff
+  'feeld': 'feeld',         // Feeld
+  'her': 'her',             // Her
+  'pof': 'pof',             // POF-Plenty of Fish
+  'signal': 'signal',       // Signal
+  'discord': 'discord',     // Discord ← WAS MISSING!
+  'vb': 'vb',              // Viber
+  'kakao': 'kakao',        // KakaoTalk
+  'line': 'line',          // Line
+  'sk': 'sk',              // Skype
+  'icq': 'icq',            // ICQ
+  'botim': 'botim',         // Botim
+  'zalo': 'zalo',          // Zalo
+  'kwai': 'kwai',          // Kwai
+  'azar': 'azar',          // Azar
+  'tantan': 'tantan',       // Tantan
+  'yalla': 'yalla',        // Yalla
+  'groupme': 'groupme',     // GroupMe
+  'twitch': 'twitch',      // Twitch
+  'tiktok': 'tk',          // TikTok (alias)
+  'whatsapp': 'wa',        // WhatsApp (alias)
+  'facebook': 'fb',        // Facebook (alias)
+  'telegram': 'tg',        // Telegram (alias)
+  'instagram': 'ig',       // Instagram (alias)
+  
+  // ===== MESSAGING =====
+  'google': 'google',      // Google, Youtube, Gmail ← FIXED! was 'go'
+  'apple': 'apple',        // Apple
+  'microsoft': 'microsoft', // Microsoft
+  'yahoo': 'yahoo',        // Yahoo
+  'aol': 'aol',            // AOL
+  'gmx': 'gmx',            // GMX
+  'outlook': 'microsoft',   // Outlook (uses same as Microsoft)
+  'gv': 'gv',              // Google Voice
+  
+  // ===== E-COMMERCE =====
+  'fiverr': 'fiverr',      // Fiverr
+  'ub': 'ub',              // Uber
+  'steam': 'steam',        // Steam
+  'aliexpress': 'aliexpress', // AliExpress
+  'ebay': 'ebay',          // eBay
+  'shopee': 'shopee',      // Shopee
+  'lazada': 'lazada',      // Lazada
+  'temu': 'temu',          // Temu
+  'wish': 'wish',          // Wish
+  'amazon': 'amz',         // Amazon ← FIXED! was 'az'
+  'shein': 'shein',        // Shein
+  'zara': 'zara',          // Zara
+  'nike': 'nike',          // Nike
+  'walmart': 'walmart',     // Walmart
+  'etsy': 'etsy',          // Etsy
+  'depop': 'depop',        // Depop
+  'vinted': 'vinted',      // Vinted
+  'poshmark': 'psm',      // Poshmark
+  'flipkart': 'flipkart',   // Flipkart
+  'swiggy': 'swiggy',      // Swiggy
+  'meituan': 'meituan',    // MeiTuan
+  'carousell': 'carousell', // Carousell
+  'wallapop': 'wallapop',   // Wallapop
+  'ozon': 'ozon',          // Ozon
+  'wildberries': 'wildberries', // Wildberries
+  'tdyol': 'tdyol',        // Trendyol
+  
+  // ===== GAMING =====
+  'roblox': 'roblox',      // Roblox
+  'pubg': 'pubg',          // PUBG MOBILE
+  'bz': 'bz',              // Blizzard / Battle
+  'nc': 'nc',              // NCSOFT
+  'steam': 'steam',         // Steam (duplicate removed)
+  'faceit': 'faceit',      // FACEIT
+  
+  // ===== FINANCE & CRYPTO =====
+  'coinbase': 'coinbase',   // Coinbase
+  'venmo': 'venmo',        // Venmo
+  'cash': 'cash',          // Cash App
+  'binance': 'bn',         // Binance ← FIXED! was 'binance'
+  'bybit': 'abn',          // Bybit ← FIXED! was 'bybit'
+  'okx': 'okx',            // OKX
+  'bitget': 'ahq',         // Bitget ← FIXED! was 'bitget'
+  'mexc': 'bii',           // MEXC ← FIXED!
+  'wise': 'wise',          // Wise
+  'skrill': 'skrill',      // Skrill
+  'uphold': 'uphold',      // Uphold
+  'paysafe': 'paysafe',    // PaysafeCard
+  'papara': 'papara',      // Papara
+  'tradingview': 'gc',     // Tradingview ← FIXED! was 'tradingview'
+  'nvidia': 'nvd',         // Nvidia ← FIXED! was 'nvidia'
+  'affirm': 'af',          // Affirm
+  'chime': 'chime',        // Chime
+  'bofa': 'bofa',          // Bank of America
+  'go2bank': 'go2bank',    // GO2bank
+  'creditkarma': 'creditkarma', // Credit Karma (no provider code, will pass through)
+  'sber': 'sber',          // Sber
+  'caixa': 'caixa',        // CAIXA
+  'monese': 'monese',      // Monese
+  'paypay': 'paypay',      // PayPay
+  'picpay': 'picpay',      // Picpay
+  
+  // ===== FOOD & DELIVERY =====
+  'foodpanda': 'foodpanda', // Foodpanda
+  'glovo': 'glovo',        // Glovo
+  'wolt': 'wolt',          // Wolt
+  'grab': 'grab',          // Grab
+  'bolt': 'bolt',          // Bolt
+  'lyft': 'lyft',          // Lyft
+  'careem': 'careem',      // Careem
+  'talabat': 'ani',        // Talabat ← FIXED!
+  'getir': 'getir',        // Getir
+  'justeat': 'justeat',    // Just Eat
+  
+  // ===== OTHER SERVICES =====
+  'nf': 'nf',              // Netflix
+  'disneyplus': 'disneyplus', // Disney+
+  'openai': 'openai',      // OpenAI/ChatGPT
+  'claude': 'claude',      // Claude
+  'dseek': 'dseek',        // DeepSeek
+  'vercel': 'vercel',      // Vercel
+  'airbnb': 'airbnb',      // Airbnb
+  'booking': 'booking',    // Booking.com (if exists)
+  'truecaller': 'truecaller', // Truecaller
+  'authy': 'authy',        // Authy
+  'twilio': 'twilio',      // Twilio
+  'zoho': 'zoho',          // Zoho
+  'nike': 'nike',          // Nike
+  'footlocker': 'footlocker', // Foot Locker
+  'razer': 'acm',          // Razer ← FIXED!
+  'ubisoft': 'ahb',        // Ubisoft ← FIXED!
+  
+  // ===== SPECIAL =====
+  'any-other': 'any',
+  'any': 'any',
 };
 
-function getSmsBusServiceCode(serviceId) {
-  var id = (serviceId || '').toLowerCase().trim();
-  return smsBusServiceCodeMap[id] || id;
+// ===== REVERSE MAP: Provider Numeric ID → Your Service Code =====
+// Provider returns prices with numeric IDs as keys, we need to map back
+var providerIdToServiceCode = {};
+
+// Build reverse map from provider's services list
+// Provider: {"1": {"id": 1, "title": "Telegram", "code": "tg"}, ...}
+// We want: {"1": "tg", "2": "pp", "3": "tk", ...}
+function buildReverseServiceMap(providerServicesData) {
+  providerIdToServiceCode = {};
+  if (!providerServicesData) return;
+  
+  var items = Array.isArray(providerServicesData) 
+    ? providerServicesData 
+    : Object.values(providerServicesData);
+  
+  for (var i = 0; i < items.length; i++) {
+    var item = items[i];
+    var numericId = String(item.id);
+    var code = item.code || '';
+    if (numericId && code) {
+      providerIdToServiceCode[numericId] = code;
+    }
+  }
+  
+  console.log('Built reverse service map:', Object.keys(providerIdToServiceCode).length, 'services');
 }
+// Also manually add known mappings (backup in case API fetch fails)
+var knownServiceIdMap = {
+  '1': 'tg',      // Telegram
+  '2': 'pp',      // PayPal  
+  '3': 'tk',      // TikTok
+  '4': 'af',      // Affirm
+  '5': 'wa',      // WhatsApp
+  '6': 'vb',      // Viber
+  '7': 'kakao',   // KakaoTalk
+  '8': 'google',  // Google/Youtube/Gmail
+  '9': 'bz',      // Blizzard
+  '10': 'hinge',  // Hinge
+  '11': 'microsoft', // Microsoft
+  '13': 'ub',     // Uber
+  '14': 'in',     // India (service)
+  '17': 'yahoo',  // Yahoo
+  '19': 'coinbase', // Coinbase
+  '20': 'vinted', // Vinted
+  '21': 'ebay',   // eBay
+  '25': 'gb',     // UK (country?)
+  '31': 'nc',     // NCSOFT
+  '34': 'aol',    // AOL
+  '47': 'gamemail', // GameMail
+  '48': 'imo',    // Imo
+  '52': 'openai', // OpenAI
+  '55': 'match',  // Match
+  '57': 'partying', // Partying
+  '60': 'bumble', // Bumble
+  '63': 'cash',   // Cash App
+  '66': 'rumble', // Rumble
+  '69': 'nz',     // New Zealand
+  '73': 'faceit', // FACEIT
+  '74': 'boo',    // Boo
+  '75': 'google_developer', // Google Developer
+  '77': 'luckyland', // LuckyLand
+  '78': 'pof',    // POF
+  '80': '51ca',   // 51.ca
+  '81': 'line',   // Line
+  '82': 'tinder', // Tinder
+  '83': 'fb',     // Facebook
+  '84': 'vk',     // VKontakte
+  '85': 'tw',     // Twitter
+  '87': 'nike',   // Nike
+  '88': 'amz',    // Amazon
+  '89': 'ig',     // Instagram
+  '90': 'nf',     // Netflix
+  '91': 'lazada', // Lazada
+  '92': 'shopee', // Shopee
+  '94': 'discord', // Discord
+  '95': 'bofa',   // Bank of America
+  '96': 'psm',    // Poshmark
+  '97': 'cmb',    // Coffee Meets Bagel
+  '98': 'venmo',  // Venmo
+  '99': 'inboxdollars', // InboxDollars
+  '105': 'apple', // Apple
+  '106': 'tradesy', // Tradesy
+  '107': 'okx',   // OKX
+  '108': 'foodpanda', // Foodpanda
+  '109': 'happn', // Happn
+  '110': 'wild',  // Wild
+  '111': 'okcupid', // OkCupid
+  '112': 'wish',  // Wish
+  '113': 'tamtam', // TamTam
+  '115': 'snapchat', // Snapchat
+  '117': 'fiverr', // Fiverr
+  '118': 'depop', // Depop
+  '120': 'skrill', // Skrill
+  '122': 'oldubil', // OlduBil
+  '124': 'weverse', // WeverseShop
+  '125': 'wallapop', // Wallapop
+  '126': 'ozon',   // Ozon
+  '127': 'tmaster', // Ticketmaster
+  '129': 'etsy',   // Etsy
+  '131': 'claude', // Claude
+  '132': 'winzo',  // WinZO
+  '133': 'grindr', // Grindr
+  '134': 'botim',  // Botim
+  '135': 'mchat',  // MChat
+  '136': 'sk',     // Skype
+  '137': 'offerup', // OfferUp
+  '138': 'zepto',  // Zepto
+  '139': 'cleartrip', // Cleartrip
+  '140': 'unacademy', // Unacademy
+  '141': 'paddypower', // Paddypower
+  '143': 'linode', // Linode
+  '144': 'redbubble', // Redbubble
+  '145': 'careem', // Careem
+  '146': 'foodora', // Foodora
+  '147': 'signal', // Signal
+  '148': 'walmart', // Walmart
+  '149': 'sheerid', // Sheerid
+  '150': 'zalo',   // Zalo
+  '151': 'friendtech', // Friendtech
+  '152': 'steam',  // Steam
+  '153': 'feeld',  // Feeld
+  '154': 'vercel', // Vercel
+  '155': 'azar',   // Azar
+  '156': 'airtime', // Airtime
+  '157': 'wolt',   // Wolt
+  '158': 'temu',   // Temu
+  '159': 'ipsosisay', // Ipsos iSay
+  '160': 'gameflip', // Gameflip
+  '161': 'pubg',   // PUBG
+  '162': 'footlocker', // Foot Locker
+  '163': 'gv',     // Google Voice
+  '164': 'lebon',  // Leboncoin
+  '165': 'yemeksepeti', // Yemeksepeti
+  '166': 'bereal', // BeReal
+  '167': 'glovo',  // Glovo
+  '168': 'naver',  // Naver
+  '169': 'bolt',   // Bolt
+  '170': 'blablacar', // BlaBlaCar
+  '171': 'dosi',   // DOSI
+  '173': 'kwai',   // Kwai
+  '174': 'crowdtap', // Crowdtap
+  '175': 'meituan', // MeiTuan
+  '176': 'truecaller', // Truecaller
+  '177': 'sparkdriver', // Sparkdriver
+  '178': 'lyft',   // Lyft
+  '179': 'shein',  // Shein
+  '180': 'flip',   // Flip
+  '181': 'airbnb', // Airbnb
+  '182': 'jd',     // JD
+  '183': 'bd',     // Bangladesh?
+  '184': 'zoho',   // Zoho
+  '185': 'getir',  // Getir
+  '186': 'tantan', // Tantan
+  '187': 'taobao', // TaoBao
+  '188': 'uphold', // Uphold
+  '189': 'twilio', // Twilio
+  '190': 'authy',  // Authy
+  '191': 'sweatcoin', // Sweatcoin
+  '192': 'ipfoxy', // IPFoxy
+  '193': 'ctrip',  // Ctrip
+  '194': 'yalla',  // Yalla
+  '195': 'icq',    // ICQ
+  '196': 'linkedin', // LinkedIn
+  '197': 'lemon8', // Lemon8
+  '198': 'hopi',   // Hopi
+  '199': 'sss',    // Samsung Shop
+  '200': 'playa',  // PlayerAuctions
+  '201': 'tdyol',  // Trendyol
+  '202': 'papara', // Papara
+  '203': 'zadarma', // Zadarma
+  '204': 'wildberries', // Wildberries
+  '205': 'yandex', // Yandex
+  '206': 'badoo',  // Badoo
+  '207': 'pingpong', // PingPong
+  '208': 'gmx',    // GMX
+  '209': 'ourtime', // Ourtime
+  '210': 'roblox', // Roblox
+  '211': 'civo',   // Civo
+  '212': 'baidu',  // Baidu
+  '213': 'sber',   // Sber
+  '214': 'picpay', // Picpay
+  '215': 'x5id',   // X5ID
+  '216': 'mts cashback', // MTS CashBack
+  '217': '7-eleven', // 7-Eleven
+  '218': 'weibo',  // Weibo
+  '219': 'grab',   // Grab
+  '220': '99app',  // 99app
+  '221': 'bingo plus', // Bingo Plus
+  '222': 'caixa',  // CAIXA
+  '223': 'indomaret', // Indomaret
+  '224': 'olx',    // OLX
+  '225': 'chime',  // Chime
+  '226': 'hh.ru',  // hh.ru
+  '227': 'ebay kleinanzeigen', // eBay Kleinanzeigen
+  '228': 'outlier', // Outlier
+  '229': 'irctc',  // IRCTC
+  '230': 'zoosk',  // Zoosk
+  '231': 'betfair', // Betfair
+  '232': 'aarp',   // AARP
+  '233': 'groupme', // GroupMe
+  '234': 'go2bank', // GO2bank
+  '235': 'appen',  // Appen
+  '236': 'superbet', // Superbet
+  '237': 'wise',   // Wise
+  '238': 'tixcraft', // Tixcraft
+  '239': 'xianyu', // Xianyu
+  '240': 'eneba',  // Eneba
+  '241': 'ininal', // Ininal
+  '243': 'paypay', // PayPay
+  '244': 'taito',  // Taito
+  '245': 'vandlecard', // VANDLE CARD
+  '246': 'paidy',  // Paidy
+  '247': 'kyash',  // Kyash
+  '248': 'naka',   // NAKA Pay
+  '249': 'qoo10',  // Qoo10
+  '250': 'bovada', // Bovada
+  '251': 'povo',   // Povo
+  '252': '8casino', // 888 Casino
+  '253': 'paysafe', // PaysafeCard
+  '254': 'piccoma', // Piccoma
+  '255': 'greggs', // Greggs
+  '256': 'twitch', // Twitch
+  '257': 'oneforma', // Oneforma
+  '258': 'rebtel', // Rebtel
+  '259': 'subito', // Subito
+  '261': 'dseek',  // DeepSeek
+  '262': 'tdyol2', // Trendyol (duplicate code?)
+  '263': 'siliflow', // SiliconFlow
+  '264': 'scruff', // Scruff
+  '265': 'betano', // Betano
+  '266': 'lemfi',  // Lemfi
+  '267': 'dream11', // Dream11
+  '268': 'warpcast', // Warpcast
+  '269': 'g2g',    // G2G
+  '270': 'emag',   // EMAG
+  '271': 'craigslist', // Craigslist
+  '272': 'tango',  // Tango
+  '273': 'rummy',  // Rummy Circle
+  '274': 'vision', // Vision11
+  '275': 'aliyun', // Alibaba Cloud
+  '276': 'ali',    // Alibaba
+  '277': 'freelancehunt', // Freelancehunt
+  '278': 'justeat', // Just Eat
+  '279': 'zara',   // Zara
+  '280': 'yikyak', // Yikyak
+  '281': 'truthsocial', // Truthsocial
+  '282': 'bilibili', // Bilibili
+  '283': 'creditkarma', // Credit Karma
+  '284': 'myntra', // Myntra
+  '285': 'jiomart', // JioMart
+  '286': 'whatnot', // Whatnot
+  '287': 'bn',     // Binance
+  '288': 'abn',    // Bybit
+  '289': 'bii',    // MEXC
+  '290': 'ahq',    // Bitget
+  '291': '1x',     // 1xbet
+  '292': 'bst',    // AdmiralBet
+  '293': 'byi',    // Ambassadoribet
+  '294': 'ie',     // Bet365 (provider code)
+  '295': 'agl',    // Betano (provider code)
+  '296': 'bmj',    // Betflag
+  '297': 'betinin', // Betinin
+  '298': 'bdd',    // BetMen
+};
+
+// ===== REVERSE MAP: Service Code → Numeric ID =====
+// SMS-Bus expects numeric IDs, not string codes like 'fb' instead of 'fb'
+
+var serviceCodeToNumericId = {};
+
+// Build reverse map automatically from knownServiceIdMap and smsBusServiceCodeMap
+(function() {
+  // 1. From knownServiceIdMap (numeric ID -> string code)
+  for (var numericId in knownServiceIdMap) {
+    if (knownServiceIdMap.hasOwnProperty(numericId)) {
+      var strCode = knownServiceIdMap[numericId];
+      if (!serviceCodeToNumericId[strCode]) {
+        serviceCodeToNumericId[strCode] = numericId;
+      }
+    }
+  }
+  
+  // 2. From smsBusServiceCodeMap (your internal ID -> provider string code)
+  for (var internalId in smsBusServiceCodeMap) {
+    if (smsBusServiceCodeMap.hasOwnProperty(internalId)) {
+      var providerStrCode = smsBusServiceCodeMap[internalId];
+      // Find the numeric ID for this provider string code
+      for (var numId in knownServiceIdMap) {
+        if (knownServiceIdMap[numId] === providerStrCode) {
+          if (!serviceCodeToNumericId[internalId]) {
+            serviceCodeToNumericId[internalId] = numId;
+          }
+        }
+      }
+    }
+  }
+  
+  console.log('✅ Built service code -> numeric ID map:', Object.keys(serviceCodeToNumericId).length, 'services');
+})();
+
+window.serviceCodeToNumericId = serviceCodeToNumericId;
 
 // ===== DEBUG: Test API connection =====
 window.testSmsBusApi = function() {
@@ -760,7 +1231,8 @@ window.testBuyNumber = function(serviceCode, countryCode) {
   
   smsbusBuyNumber(countryId, apiServiceCode, email)
     .then(function(data) {
-      console.log('Buy result:', data);
+      // FIX: Changed from `text` to `data` to prevent ReferenceError
+      console.log('Buy response:', JSON.stringify(data).substring(0, 200));
       showToast('Test buy successful! ID: ' + (data.id || data.activation_id), 'success');
     })
     .catch(function(err) {
@@ -785,7 +1257,10 @@ async function fetchRentalAreas() {
   if (rentalAreasCache) return rentalAreasCache;
   
   try {
-    var url = SMS_BUS_RENTAL_BASE + '/v1/rent/list/area?token=' + SMS_BUS_API_KEY;
+    // Use backend proxy instead of calling sms-bus.com directly
+    var url = '/api/v2/rent/areas';
+    console.log('[RENT] Fetching areas from backend...');
+    
     var response = await fetch(url);
     var data = await response.json();
     
@@ -810,10 +1285,12 @@ async function fetchRentalAreas() {
  * @returns {object} - { order_id, mobile_number, dialing_code, area_code, expire_at, keep_at }
  */
 async function rentNumber(areaCode, months) {
-  var url = SMS_BUS_RENTAL_BASE + '/v1/rent/get/number' +
-    '?token=' + SMS_BUS_API_KEY +
-    '&area_code=' + areaCode +
+  // Use backend proxy instead of calling sms-bus.com directly
+  var url = '/api/v2/rent/get' +
+    '?area_code=' + areaCode +
     '&time=' + months;
+  
+  console.log('[RENT] Renting from backend:', url);
   
   var response = await fetch(url);
   var data = await response.json();
@@ -841,9 +1318,8 @@ async function rentNumber(areaCode, months) {
  * Renew a rented number
  */
 async function renewRentalNumber(areaCode, mobileNumber, months) {
-  var url = SMS_BUS_RENTAL_BASE + '/v1/rent/renew/number' +
-    '?token=' + SMS_BUS_API_KEY +
-    '&area_code=' + areaCode +
+  var url = '/api/v2/rent/renew' +
+    '?area_code=' + areaCode +
     '&mobile_number=' + mobileNumber +
     '&time=' + months;
   
@@ -869,9 +1345,8 @@ async function renewRentalNumber(areaCode, mobileNumber, months) {
  * Cancel a rental order (within 20 min, no SMS received)
  */
 async function cancelRentalOrder(orderId) {
-  var url = SMS_BUS_RENTAL_BASE + '/v1/rent/cancel/order' +
-    '?token=' + SMS_BUS_API_KEY +
-    '&order_id=' + orderId;
+  var url = '/api/v2/rent/cancel' +
+    '?order_id=' + orderId;
   
   var response = await fetch(url);
   var data = await response.json();
@@ -893,18 +1368,16 @@ async function cancelRentalOrder(orderId) {
 async function listRentedNumbers(onlyActive) {
   if (typeof onlyActive === 'undefined') onlyActive = true;
   
-  var url = SMS_BUS_RENTAL_BASE + '/v1/rent/list/number' +
-    '?token=' + SMS_BUS_API_KEY +
-    '&only_active=' + onlyActive +
-    '&page_size=100';
+  var url = '/api/rentals/' + ((typeof getUserEmail === 'function') ? getUserEmail() : '');
   
+  // This already uses backend, no change needed except removing direct API call fallback
   var response = await fetch(url);
   var data = await response.json();
   
-  if (data.code === 200 && data.data) {
-    return data.data.list || [];
+  if (Array.isArray(data)) {
+    return data;
   } else {
-    console.error('Failed to list rented numbers:', data.message);
+    console.error('Failed to list rented numbers');
     return [];
   }
 }
@@ -913,9 +1386,8 @@ async function listRentedNumbers(onlyActive) {
  * Get latest SMS for a rented number
  */
 async function getRentalLatestSms(areaCode, mobileNumber) {
-  var url = SMS_BUS_RENTAL_BASE + '/v1/rent/get/sms' +
-    '?token=' + SMS_BUS_API_KEY +
-    '&area_code=' + areaCode +
+  var url = '/api/v2/rent/sms' +
+    '?area_code=' + areaCode +
     '&mobile_number=' + mobileNumber;
   
   var response = await fetch(url);
@@ -938,11 +1410,7 @@ async function getRentalLatestSms(areaCode, mobileNumber) {
  * List SMS history for a rented number
  */
 async function listRentalSms(areaCode, mobileNumber) {
-  var url = SMS_BUS_RENTAL_BASE + '/v1/rent/list/sms' +
-    '?token=' + SMS_BUS_API_KEY +
-    '&area_code=' + areaCode +
-    '&mobile_number=' + mobileNumber +
-    '&page_size=50';
+  var url = '/api/rental/' + ((typeof getUserEmail === 'function') ? getUserEmail() : '') + '/sms/' + areaCode + '/' + mobileNumber;
   
   var response = await fetch(url);
   var data = await response.json();
@@ -993,3 +1461,62 @@ window.getRentalLatestSms = getRentalLatestSms;
 window.listRentalSms = listRentalSms;
 window.getAreaFlag = getAreaFlag;
 window.rentalPriceWithProfit = rentalPriceWithProfit;
+
+// ===== GET SMS-BUS COUNTRY ID (maps your country codes to provider's numeric IDs) =====
+function getSmsBusCountryId(countryCode) {
+  var code = (countryCode || '').toLowerCase().trim();
+  
+  // Direct lookup in the map
+  if (countryIdMap[code]) return countryIdMap[code];
+  
+  // Try with common variations
+  var variations = [
+    code,
+    code.replace(/[^a-z]/g, ''),
+    code.toUpperCase(),
+  ];
+  
+  for (var i = 0; i < variations.length; i++) {
+    if (countryIdMap[variations[i]]) return countryIdMap[variations[i]];
+  }
+  
+  // Not found
+  console.warn('No SMS-Bus country ID for:', countryCode);
+  return null;
+}
+
+// ===== GET SMS-BUS SERVICE CODE (FIXED to return numeric ID) =====
+function getSmsBusServiceCode(serviceId) {
+  var id = (serviceId || '').toLowerCase().trim();
+  
+  // 1. First check if we have a direct numeric mapping for this exact ID
+  if (serviceCodeToNumericId[id]) {
+    return serviceCodeToNumericId[id];
+  }
+  
+  // 2. Clean the ID (remove spaces, special chars) and try again
+  var clean = id.replace(/[^a-z0-9]/g, '');
+  if (serviceCodeToNumericId[clean]) {
+    return serviceCodeToNumericId[clean];
+  }
+  
+  // 3. Fallback: Map to provider string code, then look up numeric ID for that
+  var providerCode = smsBusServiceCodeMap[id] || smsBusServiceCodeMap[clean];
+  if (providerCode && serviceCodeToNumericId[providerCode]) {
+    return serviceCodeToNumericId[providerCode];
+  }
+  
+  // 4. Final fallback: return the original ID and let API try (will likely fail but doesn't crash)
+  console.warn('No numeric ID found for service:', id, '- passing raw code to API');
+  return id;
+}
+
+// ===== EXPOSE TO WINDOW FOR OTHER SCRIPTS =====
+window.getSmsBusCountryId = getSmsBusCountryId;
+window.getSmsBusServiceCode = getSmsBusServiceCode;
+window.countryIdMap = countryIdMap;
+window.providerServiceMap = null; // Will be set by buildProviderServiceMap
+window.knownServiceIdMap = knownServiceIdMap;
+window.fetchPricesForCountry = fetchPricesForCountry;
+window.buildProviderServiceMap = buildProviderServiceMap;
+window.smsBusServiceCodeMap = smsBusServiceCodeMap;

@@ -62,7 +62,7 @@ if (!window.autoRefreshInterval) window.autoRefreshInterval = null;
 var _isTranslating = false;
 
 // ===== CACHING SYSTEM =====
-var _balanceCache = { value: 0, timestamp: 0, loading: false };
+var _balanceCache = { value: parseFloat(localStorage.getItem('cachedBalance') || 0), timestamp: 0, loading: false };
 var _numbersCache = { data: [], timestamp: 0, loading: false };
 var _historyCache = { data: [], timestamp: 0, loading: false };
 var _depositHistoryCache = { data: [], timestamp: 0, loading: false };
@@ -218,8 +218,23 @@ function showToast(message, type) {
   container.appendChild(toast); setTimeout(function() { if (toast.parentNode) toast.remove(); }, 3000);
 }
 
-function updateBalanceDisplay(amount) { var el = document.getElementById('balanceAmount'); if (el) el.textContent = '$' + amount.toFixed(2); _balanceCache.value = amount; }
-window.syncBalance = updateBalanceDisplay;
+function updateBalanceDisplay(amount) {
+  _balanceCache.value = parseFloat(amount) || 0;
+  
+  // Update ALL balance elements
+  var selectors = ['#balanceAmount', '.balance-amount', '#depositCurrentBalance', '.nav-balance', '#navBalance'];
+  selectors.forEach(function(sel) {
+    document.querySelectorAll(sel).forEach(function(el) {
+      el.textContent = '$' + _balanceCache.value.toFixed(2);
+    });
+  });
+  
+  // Cache to localStorage for instant display on next page load
+  var email = (typeof getUserEmail === 'function') ? getUserEmail() : '';
+  if (email) {
+    localStorage.setItem('cachedBalance', _balanceCache.value.toString());
+  }
+}
 
 async function loadBalance(forceRefresh) {
   if (typeof getUserEmail !== 'function') return _balanceCache.value;
@@ -233,19 +248,71 @@ async function loadBalance(forceRefresh) {
 async function loadNumbers(forceRefresh) {
   if (typeof getUserEmail !== 'function') { window.activeNumbers = []; return; }
   var now = Date.now();
-  if (!forceRefresh && _numbersCache.timestamp && (now - _numbersCache.timestamp) < CACHE_TTL) { window.activeNumbers = _numbersCache.data; return; }
-  if (_numbersCache.loading) return;
+  if (!forceRefresh && _numbersCache.timestamp && (now - _numbersCache.timestamp) < CACHE_TTL) { 
+    window.activeNumbers = _numbersCache.data; 
+    if (window.currentPage === 'numbers') renderMainContent();
+    return; 
+  }
+  if (_numbersCache.loading) {
+    var check = setInterval(function() { 
+      if (!_numbersCache.loading) { 
+        clearInterval(check); 
+        if (window.currentPage === 'numbers') renderMainContent(); 
+      } 
+    }, 100);
+    return;
+  }
   _numbersCache.loading = true;
-  try { var r = await fetch('/api/numbers/' + getUserEmail()); if (!r.ok) throw new Error(); _numbersCache.data = await r.json(); _numbersCache.timestamp = now; window.activeNumbers = _numbersCache.data; } catch(e) { window.activeNumbers = _numbersCache.data || []; } finally { _numbersCache.loading = false; }
+  try { 
+    var r = await fetch('/api/numbers/' + getUserEmail()); 
+    if (!r.ok) throw new Error(); 
+    _numbersCache.data = await r.json(); 
+    _numbersCache.timestamp = now; 
+    window.activeNumbers = _numbersCache.data;
+    // ✅ FIX: Re-render after loading
+    if (window.currentPage === 'numbers') renderMainContent();
+  } catch(e) { 
+    window.activeNumbers = _numbersCache.data || []; 
+    if (window.currentPage === 'numbers') renderMainContent();
+  } finally { 
+    _numbersCache.loading = false; 
+  }
 }
 
 async function loadHistory(forceRefresh) {
   if (typeof getUserEmail !== 'function') { window.historyData = []; return; }
   var now = Date.now();
-  if (!forceRefresh && _historyCache.timestamp && (now - _historyCache.timestamp) < CACHE_TTL) { window.historyData = _historyCache.data; return; }
-  if (_historyCache.loading) return;
+  if (!forceRefresh && _historyCache.timestamp && (now - _historyCache.timestamp) < CACHE_TTL) { 
+    window.historyData = _historyCache.data; 
+    // Re-render if on history page
+    if (window.currentPage === 'history') renderMainContent();
+    return; 
+  }
+  if (_historyCache.loading) {
+    // If already loading, wait and then render
+    var check = setInterval(function() { 
+      if (!_historyCache.loading) { 
+        clearInterval(check); 
+        if (window.currentPage === 'history') renderMainContent(); 
+      } 
+    }, 100);
+    return;
+  }
   _historyCache.loading = true;
-  try { var r = await fetch('/api/history/' + getUserEmail()); if (!r.ok) throw new Error(); _historyCache.data = await r.json(); _historyCache.timestamp = now; window.historyData = _historyCache.data; } catch(e) { window.historyData = _historyCache.data || []; } finally { _historyCache.loading = false; }
+  try { 
+    var r = await fetch('/api/history/' + getUserEmail()); 
+    if (!r.ok) throw new Error(); 
+    _historyCache.data = await r.json(); 
+    _historyCache.timestamp = now; 
+    window.historyData = _historyCache.data;
+    // ✅ FIX: Re-render after loading
+    if (window.currentPage === 'history') renderMainContent();
+  } catch(e) { 
+    window.historyData = _historyCache.data || []; 
+    if (window.currentPage === 'history') renderMainContent();
+  } finally { 
+    _historyCache.loading = false; 
+  }
 }
 
 function renderMainContent() {

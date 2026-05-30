@@ -1,3 +1,7 @@
+// ====================================================================
+// ====== START SERVER ======
+// ====================================================================
+
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -593,10 +597,10 @@ app.post('/api/numbers/save', async function(req, res) {
     var phone = req.body.phone;
     var serviceName = req.body.serviceName;
     var serviceId = req.body.serviceId;
-    var serviceIcon = req.body.serviceIcon;
-    var countryCode = req.body.countryCode;
-    var countryFlag = req.body.countryFlag;
-    var countryName = req.body.countryName;
+    var serviceIcon = req.body.serviceIcon || null;
+    var countryCode = req.body.countryCode || null;
+    var countryFlag = req.body.countryFlag || null;
+    var countryName = req.body.countryName || null;
     var cost = req.body.cost;
     var status = req.body.status || 'waiting';
     var createdAt = req.body.createdAt;
@@ -610,13 +614,20 @@ app.post('/api/numbers/save', async function(req, res) {
     if (!user) return res.status(404).json({ error: 'User not found' });
     if (user.balance < cost) return res.status(400).json({ error: 'Insufficient balance' });
 
-    // Deduct balance
+        // Deduct balance
     await db.prepare('UPDATE users SET balance = balance - $1 WHERE email = $2').run(cost, email);
 
-    // Insert number
-    await db.prepare(
-      'INSERT INTO numbers (email, provider_request_id, phone, service_name, service_id, service_icon, country_code, country_flag, country_name, cost, status, created_at, total_time, time_left, code, sms_text) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NULL, NULL)'
-    ).run(email, activationId, phone, serviceName, serviceId, serviceIcon, countryCode, countryFlag, countryName, cost, status, createdAt, totalTime, totalTime);
+    // Try full insert, fall back to basic if columns missing
+    try {
+      await db.prepare(
+        'INSERT INTO numbers (email, provider_request_id, phone, service_name, service_id, service_icon, country_code, country_flag, country_name, cost, status, created_at, total_time, time_left, code, sms_text) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NULL, NULL)'
+      ).run(email, activationId, phone, serviceName, serviceId, serviceIcon || null, countryCode || null, countryFlag || null, countryName || null, cost, status, createdAt, totalTime, totalTime);
+    } catch (colErr) {
+      console.log('[DB] Using basic insert:', colErr.message);
+      await db.prepare(
+        'INSERT INTO numbers (email, provider_request_id, phone, service_name, service_id, cost, status, created_at, total_time, time_left) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)'
+      ).run(email, activationId, phone, serviceName, serviceId, cost, status, createdAt, totalTime, totalTime);
+    }
 
     // Add to history
     await db.prepare(
@@ -1197,84 +1208,118 @@ app.get('/api/admin/referrals', requireAdmin, async function(req, res) {
 });
 
 // ====================================================================
-// ====== SMS-BUS PROXY ROUTES (Regular number purchases) ======
+// ====== SMS-BUS PROXY ROUTES (SELF-CONTAINED) ======
 // ====================================================================
 
-const SMS_BUS_TOKEN = 'd4a7951968ed4e59a647a0ac1d1af637';
-const SMS_BUS_BASE = 'https://sms-bus.com/api/control/list';
+const SMS_BUS_TOKEN = process.env.SMS_API_KEY || 'd4a7951968ed4e59a647a0ac1d1af637';
+var _SMS_TOKEN = SMS_BUS_TOKEN;
 
-// GET /api/v2/prices?country_id=5
+// GET /api/v2/prices?country_id=25
+// ====================================================================
+// ====== SMS-BUS PROXY ROUTES ======
+// ====================================================================
+
 app.get('/api/v2/prices', async function(req, res) {
   try {
     var country_id = req.query.country_id;
-    var response = await fetch(SMS_BUS_BASE + '/prices?token=' + SMS_BUS_TOKEN + '&country_id=' + country_id);
-    var data = await response.json();
-    res.json(data);
+    var url = 'https://sms-bus.com/api/control/list/prices?token=' + _SMS_TOKEN + '&country_id=' + country_id;
+    var response = await fetch(url);
+    var text = await response.text();
+    res.setHeader('Content-Type', 'application/json');
+    res.send(text);
   } catch (err) {
-    console.error('SMS-Bus prices error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// POST /api/v2/buy
+app.get('/api/v2/buy', async function(req, res) {
+  try {
+    var country_id = req.query.country_id;
+    var project_id = req.query.project_id;
+    var email = req.query.email;
+    var url = 'https://sms-bus.com/api/control/get/number?token=' + _SMS_TOKEN + '&country_id=' + country_id + '&project_id=' + project_id;
+    if (email) url += '&email=' + encodeURIComponent(email);
+    console.log('[BUY] URL:', url);
+    var response = await fetch(url);
+    var text = await response.text();
+    console.log('[BUY] Response:', text.substring(0, 500));
+    res.setHeader('Content-Type', 'application/json');
+    res.send(text);
+  } catch (err) {
+    console.error('[BUY] Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/v2/status', async function(req, res) {
+  try {
+    var request_id = req.query.request_id;
+    var url = 'https://sms-bus.com/api/control/get/sms?token=' + _SMS_TOKEN + '&request_id=' + request_id;
+    var response = await fetch(url);
+    var text = await response.text();
+    res.setHeader('Content-Type', 'application/json');
+    res.send(text);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/v2/cancel', async function(req, res) {
+  try {
+    var request_id = req.query.request_id;
+    var url = 'https://sms-bus.com/api/control/cancel?token=' + _SMS_TOKEN + '&request_id=' + request_id;
+    var response = await fetch(url);
+    var text = await response.text();
+    res.setHeader('Content-Type', 'application/json');
+    res.send(text);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/v2/services', async function(req, res) {
+  try {
+    var url = 'https://sms-bus.com/api/control/list/projects?token=' + _SMS_TOKEN;
+    var response = await fetch(url);
+    var text = await response.text();
+    res.setHeader('Content-Type', 'application/json');
+    res.send(text);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST fallbacks
 app.post('/api/v2/buy', async function(req, res) {
-  try {
-    var country_id = req.body.country_id;
-    var service_code = req.body.service_code;
-    var email = req.body.email;
-    
-    var response = await fetch(SMS_BUS_BASE + '/buy', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        token: SMS_BUS_TOKEN,
-        country_id: country_id,
-        service_code: service_code,
-        email: email
-      })
-    });
-    var data = await response.json();
-    res.json(data);
-  } catch (err) {
-    console.error('SMS-Bus buy error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
+  var params = new URLSearchParams(req.body);
+  res.redirect(307, '/api/v2/buy?' + params.toString());
 });
-
-// POST /api/v2/status
 app.post('/api/v2/status', async function(req, res) {
-  try {
-    var id = req.body.id;
-    var response = await fetch(SMS_BUS_BASE + '/status', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token: SMS_BUS_TOKEN, id: id })
-    });
-    var data = await response.json();
-    res.json(data);
-  } catch (err) {
-    console.error('SMS-Bus status error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
+  var params = new URLSearchParams(req.body);
+  res.redirect(307, '/api/v2/status?' + params.toString());
 });
-
-// POST /api/v2/cancel
 app.post('/api/v2/cancel', async function(req, res) {
+  var params = new URLSearchParams(req.body);
+  res.redirect(307, '/api/v2/cancel?' + params.toString());
+});
+
+// GET /api/v2/services
+app.get('/api/v2/services', async function(req, res) {
   try {
-    var id = req.body.id;
-    var response = await fetch(SMS_BUS_BASE + '/cancel', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token: SMS_BUS_TOKEN, id: id })
-    });
-    var data = await response.json();
-    res.json(data);
+    var url = 'https://sms-bus.com/api/control/list/projects?token=' + SMS_BUS_TOKEN;
+    
+    var response = await fetch(url);
+    var text = await response.text();
+    
+    res.setHeader('Content-Type', 'application/json');
+    res.send(text);
   } catch (err) {
-    console.error('SMS-Bus cancel error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
+// DELETE the simple /api/v2/rent/areas, /api/v2/rent/get, etc. routes that follow
+// Keep ONLY the ones with findWorkingRentUrl() logic
 /// ====================================================================
 // ====== SMS-BUS RENTAL PROXY ROUTES (WITH DEBUG) ======
 // ====================================================================
@@ -1313,46 +1358,6 @@ async function findWorkingRentUrl() {
   return null;
 }
 
-// GET /api/v2/rent/areas?area_code=US
-app.get('/api/v2/rent/areas', async function(req, res) {
-  try {
-    var areaCode = req.query.area_code;
-    
-    var baseUrl = await findWorkingRentUrl();
-    if (!baseUrl) {
-      return res.json({ 
-        code: 0, 
-        data: [],
-        debug: 'Could not reach SMS-Bus rental API',
-        tried: SMS_BUS_URLS
-      });
-    }
-    
-    var url = baseUrl + '/v1/rent/list/area?token=' + SMS_BUS_TOKEN;
-    var response = await fetch(url);
-    var data = await response.json();
-    
-    var areas = data.data || [];
-    
-    // Filter if specific area requested
-    if (areaCode && Array.isArray(areas)) {
-      var filtered = areas.filter(function(a) {
-        return (a.area_code || '').toUpperCase() === areaCode.toUpperCase();
-      });
-      if (filtered.length > 0) {
-        areas = filtered;
-      } else {
-        // Area not found - return empty but successful so UI shows "not available" not error
-        areas = [];
-      }
-    }
-    
-    res.json({ code: data.code || 200, data: areas });
-  } catch (err) {
-    console.error('Rental areas error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
 
 // POST /api/v2/rent/get
 app.post('/api/v2/rent/get', async function(req, res) {
@@ -1461,46 +1466,7 @@ app.post('/api/v2/rent/cancel', async function(req, res) {
     res.status(500).json({ error: err.message });
   }
 });
-
-// DEBUG ROUTE - call this to see what SMS-Bus returns
-app.get('/api/v2/rent/debug', async function(req, res) {
-  var results = {};
   
-  for (var i = 0; i < SMS_BUS_URLS.length; i++) {
-    var url = SMS_BUS_URLS[i] + '/v1/rent/list/area?token=' + SMS_BUS_TOKEN;
-    try {
-      var response = await fetch(url, { signal: AbortSignal.timeout(10000) });
-      var text = await response.text();
-      results[SMS_BUS_URLS[i]] = {
-        status: response.status,
-        body: text.substring(0, 500),
-        ok: response.ok
-      };
-    } catch (err) {
-      results[SMS_BUS_URLS[i]] = {
-        error: err.message
-      };
-    }
-  }
-  
-  // Also test the regular API to confirm token works
-  try {
-    var regularUrl = 'https://sms-bus.com/api/control/list/countries?token=' + SMS_BUS_TOKEN;
-    var regRes = await fetch(regularUrl, { signal: AbortSignal.timeout(10000) });
-    var regData = await regRes.json();
-    results['regular_api_test'] = {
-      status: regRes.status,
-      code: regData.code,
-      countryCount: regData.data ? Object.keys(regData.data).length : 0,
-      tokenWorks: regData.code === 200
-    };
-  } catch (err) {
-    results['regular_api_test'] = { error: err.message };
-  }
-  
-  res.json(results);
-});
-
 // ====================================================================
 // ====== RENTALS DATABASE (PostgreSQL syntax) ======
 // ====================================================================
@@ -1690,7 +1656,7 @@ async function loadProviderMaps() {
 loadProviderMaps();
 
 // ====================================================================
-// ====== CREATE RENTALS TABLE IF NOT EXISTS ======
+// ====== TABLE SETUP ======
 // ====================================================================
 
 async function ensureRentalsTable() {
@@ -1717,19 +1683,138 @@ async function ensureRentalsTable() {
         sms JSONB DEFAULT '[]'
       )
     `).run();
-    
-    // Add index for faster lookups
-    await db.prepare('CREATE INDEX IF NOT EXISTS idx_rentals_email ON rentals(email)').run();
-    await db.prepare('CREATE INDEX IF NOT EXISTS idx_rentals_rent_id ON rentals(rent_id)').run();
-    await db.prepare('CREATE INDEX IF NOT EXISTS idx_rentals_status ON rentals(status)').run();
-    
-    console.log('Rentals table ready');
+    console.log('✅ Rentals table ready');
   } catch (err) {
-    console.error('Failed to create rentals table:', err.message);
+    console.error('Rentals table error:', err.message);
+  }
+}
+
+async function ensureNumbersColumns() {
+  var cols = [
+    ['service_icon', 'VARCHAR(500)'],
+    ['country_code', 'VARCHAR(10)'],
+    ['country_flag', 'VARCHAR(10)'],
+    ['country_name', 'VARCHAR(100)']
+  ];
+  for (var i = 0; i < cols.length; i++) {
+    try {
+      await db.prepare('ALTER TABLE numbers ADD COLUMN ' + cols[i][0] + ' ' + cols[i][1]).run();
+      console.log('✅ Added numbers.' + cols[i][0]);
+    } catch (e) {}
   }
 }
 
 ensureRentalsTable();
+ensureNumbersColumns();
+
+// ====================================================================
+// ====== START SERVER ======
+// ====================================================================
+
+var PORT = process.env.PORT || 3001;
+  var server = app.listen(PORT, function() { 
+});
+
+loadProviderMaps();
+
+// ====================================================================
+// ====== TABLE SETUP ======
+// ====================================================================
+
+async function setupTables() {
+  // Wait a moment for db to fully initialize
+  await new Promise(function(resolve) { setTimeout(resolve, 500); });
+  
+  // Check if db is ready
+  if (!db || !db.prepare) {
+    console.error('WARNING: db not ready, skipping table setup');
+    return;
+  }
+  
+  // Create rentals table
+  try {
+    await db.prepare(`
+      CREATE TABLE IF NOT EXISTS rentals (
+        id SERIAL PRIMARY KEY,
+        email VARCHAR(255) NOT NULL,
+        rent_id VARCHAR(255) NOT NULL UNIQUE,
+        sms_fetch_id VARCHAR(255),
+        phone VARCHAR(50) NOT NULL,
+        dialing_code VARCHAR(10),
+        plan_id VARCHAR(50),
+        plan_name VARCHAR(100),
+        duration_months INTEGER DEFAULT 1,
+        provider_cost DECIMAL(10,2) DEFAULT 0,
+        cost DECIMAL(10,2) NOT NULL,
+        country_code VARCHAR(10),
+        country_flag VARCHAR(10),
+        country_name VARCHAR(100),
+        status VARCHAR(50) DEFAULT 'active',
+        expires_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        sms JSONB DEFAULT '[]'
+      )
+    `).run();
+    console.log('✅ Rentals table ready');
+  } catch (err) {
+    console.error('Rentals table error:', err.message);
+  }
+
+  // Add missing columns to numbers table
+  var cols = [
+    ['service_icon', 'VARCHAR(500)'],
+    ['country_code', 'VARCHAR(10)'],
+    ['country_flag', 'VARCHAR(10)'],
+    ['country_name', 'VARCHAR(100)']
+  ];
+  for (var i = 0; i < cols.length; i++) {
+    try {
+      await db.prepare('ALTER TABLE numbers ADD COLUMN ' + cols[i][0] + ' ' + cols[i][1]).run();
+      console.log('✅ Added numbers.' + cols[i][0]);
+    } catch (e) {
+      // Column already exists - silent
+    }
+  }
+}
+
+// Run table setup (don't await - run in background)
+setupTables();
+
+// ====================================================================
+// ====== AUTO-LOAD SMS PROVIDER MAPS ======
+// ====================================================================
+
+async function loadProviderMaps() {
+  await new Promise(function(resolve) { setTimeout(resolve, 1000); });
+  
+  if (!db || !db.prepare) return;
+  
+  try {
+    var provider = require('./sms-provider');
+    var token = process.env.SMS_API_KEY || 'd4a7951968ed4e59a647a0ac1d1af637';
+
+    var cRes = await fetch('https://sms-bus.com/api/control/list/countries?token=' + token);
+    var cData = await cRes.json();
+    var countryMap = {};
+    if (cData.code === 200 && cData.data) {
+      Object.values(cData.data).forEach(function(c) { countryMap[c.code.toLowerCase()] = String(c.id); });
+    }
+
+    var pRes = await fetch('https://sms-bus.com/api/control/list/projects?token=' + token);
+    var pData = await pRes.json();
+    var serviceMap = {};
+    if (pData.code === 200 && pData.data) {
+      Object.values(pData.data).forEach(function(p) { serviceMap[p.code.toLowerCase()] = String(p.id); });
+    }
+
+    provider.setMaps(serviceMap, countryMap);
+    console.log('✅ Provider maps loaded. Services:', Object.keys(serviceMap).length, 'Countries:', Object.keys(countryMap).length);
+  } catch (err) {
+    console.error('Provider maps error:', err.message);
+  }
+}
+
+loadProviderMaps();
 
 // ====================================================================
 // ====== START SERVER ======
@@ -1737,7 +1822,7 @@ ensureRentalsTable();
 
 var PORT = process.env.PORT || 3001;
 var server = app.listen(PORT, function() {
-  console.log('Server started on port ' + PORT);
+  console.log('✅ Server started on port ' + PORT);
 });
 
 server.on('clientError', function(err, socket) {
