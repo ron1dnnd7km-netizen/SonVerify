@@ -1,3 +1,17 @@
+// ===== INIT THEME IMMEDIATELY (BEFORE ANYTHING RENDERS) =====
+(function initThemeImmediately() {
+  var isDark = localStorage.getItem('darkMode') === 'true';
+  if (isDark) {
+    document.documentElement.setAttribute('data-theme', 'dark');
+  }
+  // Also check for system preference if no user choice
+  if (localStorage.getItem('darkMode') === null) {
+    if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+      document.documentElement.setAttribute('data-theme', 'dark');
+    }
+  }
+})();
+
 // =======================================================================
 // ===== SUPPRESS NON-CRITICAL ERRORS THAT BLOCK PAYMENTS =====
 // =======================================================================
