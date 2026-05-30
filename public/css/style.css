@@ -2396,3 +2396,34 @@ input:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+
+/* Desktop Logo */
+.logo-img {
+  height: 32px;
+  width: auto;
+  object-fit: contain;
+  border-radius: 8px;
+  vertical-align: middle;
+  margin-right: 8px;
+}
+
+/* Mobile Logo - smaller */
+.logo-img-mobile {
+  height: 28px;
+  width: auto;
+  object-fit: contain;
+  border-radius: 6px;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+
+/* Ensure favicon renders crisply */
+link[rel="icon"] {
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: crisp-edges;
+}
+
+/* Apple touch icon styling */
+link[rel="apple-touch-icon"] {
+  border-radius: 20%;
+}
