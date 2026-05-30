@@ -8,6 +8,7 @@ function calcCardFee(loadAmount) { return parseFloat((loadAmount * 0.30).toFixed
 var rentAreaCodeMap = {
   'us': 'US', 'gb': 'GB', 'uk': 'GB', 'ca': 'CA'
 };
+
 function getRentAreaCode(cc) { return rentAreaCodeMap[(cc || '').toLowerCase()] || null; }
 
 
@@ -899,6 +900,12 @@ function showShareLinkModal(modal, token, card, brand, typeName) {
     '</div>';
 }
 
+// Legacy compatibility - old code might call loadHistory()
+window.loadHistory = function() {
+  return loadUnifiedHistory();
+};
+
+
 window.copyShareLink = function() {
   var link = window._currentShareLink || '';
   var input = document.getElementById('shareLinkInput');
@@ -1459,14 +1466,14 @@ function renderRentPage(main) {
       var td = dl > 0 ? dl + 'd ' + hl + 'h' : hl + 'h';
       var sl = '';
       if (rental.sms && rental.sms.length > 0) {
-        sl = '<div class="rental-sms-list">' + rental.sms.map(function(s) {
+        sl = '<div class="rental-sms-list" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);">' + rental.sms.map(function(s) {
           var st = new Date(s.receivedAt);
           return '<div class="rental-sms-item"><div class="sms-from">From: ' + (s.sender || 'Unknown') + '</div><div class="sms-body">' + (s.text || '') + '</div><div class="sms-time">' + st.toLocaleDateString() + ' ' + st.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + '</div></div>';
         }).join('') + '</div>';
       } else {
         sl = '<div style="text-align:center;padding:16px;color:var(--text-muted);font-size:13px;"><i class="far fa-comment-dots" style="font-size:24px;margin-bottom:8px;display:block;opacity:0.3;"></i>No SMS received yet</div>';
       }
-      return '<div class="rental-item"><div class="rental-top"><div class="rental-left"><span style="font-size:24px;">' + cf + '</span><div><div class="rental-phone">' + pd + '</div><div class="rental-expiry"><i class="fas fa-clock"></i> ' + td + ' remaining</div></div></div><div style="display:flex;gap:8px;"><button class="btn-sm refresh" onclick="refreshRentalSms(\'' + rental.id + '\')"><i class="fas fa-sync-alt"></i> Refresh</button><button class="btn-btn cancel" onclick="cancelRental(\'' + rental.id + '\')"><i class="fas fa-times"></i> Cancel</button></div></div>' + sl + '</div>';
+      return '<div class="rental-item" style="cursor:pointer;" onclick="showRentalDetails(\'' + rental.id + '\')"><div class="rental-top"><div class="rental-left" style="flex:1;"><span style="font-size:24px;">' + cf + '</span><div><div class="rental-phone" style="display:flex;align-items:center;gap:6px;">' + pd + ' <i class="fas fa-chevron-right" style="font-size:10px;color:var(--text-muted);opacity:0.5;"></i></div><div class="rental-expiry"><i class="fas fa-clock"></i> ' + td + ' remaining</div></div></div></div>' + sl + '</div>';
     }).join('');
   } else {
     activeRentalsHTML = '<div class="empty-state" style="padding:40px 20px;"><i class="fas fa-phone-alt"></i><p>No active rentals.</p></div>';
@@ -1484,14 +1491,14 @@ function renderRentPage(main) {
   main.innerHTML =
     '<div class="page-header"><div><h1 class="page-title"><i class="fas fa-calendar-alt" style="color:var(--accent);margin-right:10px;"></i>Rent Number</h1><p style="font-size:14px;color:var(--text-secondary);margin-top:8px;">Get a dedicated number for extended use with unlimited SMS</p></div></div>' +
 
-    '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:18px;padding:24px;box-shadow:var(--shadow-sm);margin-bottom:28px;">' +
+    '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:25px;padding:24px;box-shadow:var(--shadow-sm);margin-bottom:28px;">' +
       '<div style="display:flex;align-items:center;gap:14px;margin-bottom:20px;"><div style="width:44px;height:44px;border-radius:12px;background:var(--accent-dim);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i class="fas fa-cog" style="font-size:18px;color:var(--accent);"></i></div><div><h2 style="font-size:17px;font-weight:700;margin-bottom:2px;">Rental Configuration</h2><p style="font-size:12px;color:var(--text-secondary);line-height:1.4;">Choose country and duration</p></div></div>' +
       '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:20px;"><div style="background:rgba(13,155,122,0.06);border:1px solid rgba(13,155,122,0.15);border-radius:10px;padding:10px 8px;text-align:center;"><i class="fas fa-infinity" style="color:var(--accent);font-size:14px;margin-bottom:3px;display:block;"></i><div style="font-size:11px;color:var(--text-secondary);font-weight:600;">Unlimited SMS</div></div><div style="background:rgba(13,155,122,0.06);border:1px solid rgba(13,155,122,0.15);border-radius:10px;padding:10px 8px;text-align:center;"><i class="fas fa-phone-alt" style="color:var(--accent);font-size:14px;margin-bottom:3px;display:block;"></i><div style="font-size:11px;color:var(--text-secondary);font-weight:600;">Dedicated Number</div></div><div style="background:rgba(13,155,122,0.06);border:1px solid rgba(13,155,122,0.15);border-radius:10px;padding:10px 8px;text-align:center;"><i class="fas fa-sync-alt" style="color:var(--accent);font-size:14px;margin-bottom:3px;display:block;"></i><div style="font-size:11px;color:var(--text-secondary);font-weight:600;">Auto-Extend</div></div></div>' +
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px;"><div><label style="display:block;font-size:12px;font-weight:600;margin-bottom:6px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;"><i class="fas fa-globe" style="margin-right:4px;color:var(--accent);"></i>Country</label><select class="form-select" id="rentCountrySelect" onchange="onRentCountryChange(this.value)" style="width:100%;padding:11px 12px;background:var(--bg-primary);border:1px solid var(--border);border-radius:10px;color:var(--text-primary);font-size:14px;outline:none;">' + countryOptionsHTML + '</select></div><div><label style="display:block;font-size:12px;font-weight:600;margin-bottom:6px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;"><i class="far fa-clock" style="margin-right:4px;color:var(--accent);"></i>Duration</label><select class="form-select" id="rentMonthsSelect" onchange="onRentMonthsChange(this.value)" style="width:100%;padding:11px 12px;background:var(--bg-primary);border:1px solid var(--border);border-radius:10px;color:var(--text-primary);font-size:14px;outline:none;"><option value="1">1 Month</option><option value="2">2 Months</option><option value="3">3 Months</option><option value="5">5 Months</option><option value="12">12 Months</option></select></div></div>' +
       '<div id="rentPriceLoading" style="display:flex;align-items:center;justify-content:center;gap:8px;padding:14px;background:var(--bg-primary);border-radius:10px;border:1px solid var(--border);margin-bottom:12px;"><i class="fas fa-spinner fa-spin" style="color:var(--accent);font-size:14px;"></i><span style="font-size:13px;color:var(--text-muted);">Checking availability...</span></div>' +
       '<div id="rentNotAvailable" style="display:none;flex-direction:column;align-items:center;gap:8px;padding:18px 16px;background:rgba(217,48,37,0.05);border:1px solid rgba(217,48,37,0.12);border-radius:12px;margin-bottom:12px;text-align:center;"><i class="fas fa-map-marker-alt" style="font-size:22px;color:var(--danger);opacity:0.7;"></i><span style="font-size:13px;color:var(--danger);font-weight:500;line-height:1.4;">Not available for this country.</span></div>' +
       '<div id="rentFallbackNotice" style="display:none;align-items:center;gap:8px;padding:12px 14px;background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.15);border-radius:10px;margin-bottom:12px;"><i class="fas fa-info-circle" style="color:#f59e0b;font-size:14px;flex-shrink:0;"></i><span style="font-size:12px;color:var(--text-secondary);line-height:1.4;">Using estimated pricing. Actual price may vary slightly.</span></div>' +
-      '<div style="display:flex;flex-direction:column;gap:12px;padding:16px;background:var(--bg-primary);border-radius:12px;border:1px solid var(--border);"><div style="display:flex;align-items:center;gap:8px;"><span id="rentMonthsLabel" style="font-size:13px;font-weight:600;color:var(--text-secondary);background:var(--accent-dim);padding:4px 10px;border-radius:8px;">1 Month</span><span style="font-size:13px;color:var(--text-muted);">Total:</span><span id="rentTotalPrice" style="font-size:18px;font-weight:500;color:var(--accent);">$--</span></div><button class="btn btn-primary" id="rentNowBtn" disabled style="width:100%;padding:14px;font-size:15px;border-radius:12px;display:flex;align-items:center;justify-content:center;gap:8px;" onclick="executeRentNumber()"><i class="fas fa-shopping-cart"></i> Rent Now</button></div></div>' +
+      '<div style="display:flex;flex-direction:column;gap:12px;padding:16px;background:var(--bg-primary);border-radius:12px;border:1px solid var(--border);"><div style="display:flex;align-items:center;gap:8px;"><span id="rentMonthsLabel" style="font-size:13px;font-weight:600;color:var(--text-secondary);background:var(--accent-dim);padding:4px 10px;border-radius:8px;">1 Month</span><span style="font-size:13px;color:var(--text-muted);">Total:</span><span id="rentTotalPrice" style="font-size:18px;font-weight:500;color:var(--accent);">$--</span></div><button class="btn btn-primary" id="rentNowBtn" disabled style="width:100%;padding:14px;font-size:15px;border-radius:12px;display:flex;align-items:center;justify-content:center;gap:8px;" onclick="executeRentNumber()"><i class="fas fa-shopping-cart"></i> Rent Now</button><div style="display:flex;align-items:flex-start;gap:10px;padding:14px 16px;background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.15);border-radius:12px;margin-top:4px;"><i class="fas fa-info-circle" style="color:#f59e0b;font-size:14px;flex-shrink:0;margin-top:3px;"></i><div style="font-size:12px;color:var(--text-secondary);line-height:1.6;">If the number does not receive SMS messages, you may cancel it within 20 minutes free of charge. <span style="color:var(--text-muted);">Excessive cancellations may result in request restrictions.</span></div></div></div></div>' +
     '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;"><h2 style="font-size:18px;font-weight:700;display:flex;align-items:center;gap:10px;"><i class="fas fa-phone-alt" style="color:var(--accent);font-size:16px;"></i> Active Rentals</h2><span style="font-size:12px;padding:4px 12px;border-radius:10px;font-weight:600;background:var(--accent-dim);color:var(--accent);">' + activeRentals.length + '</span></div><div class="active-rentals">' + activeRentalsHTML + '</div>';
 
   var cs = document.getElementById('rentCountrySelect');
@@ -1499,6 +1506,25 @@ function renderRentPage(main) {
     window.fetchRentPrices(cs.value);
   }
 }
+
+  // Restore active rentals from localStorage backup
+  var rentEmail = (typeof getUserEmail === 'function') ? getUserEmail() : '';
+  if (rentEmail && activeRentals.length === 0) {
+    try {
+      var rentBackup = localStorage.getItem('active_rentals_' + rentEmail);
+      if (rentBackup) {
+        var rentParsed = JSON.parse(rentBackup);
+        if (Array.isArray(rentParsed)) {
+          activeRentals = rentParsed;
+        }
+      }
+    } catch(e) {}
+  }
+
+  var cs = document.getElementById('rentCountrySelect');
+  if (cs && cs.value) {
+    window.fetchRentPrices(cs.value);
+  }
 
 window.onRentCountryChange = function(cc) {
   currentRentArea = null;
@@ -1509,6 +1535,7 @@ window.onRentCountryChange = function(cc) {
   window.fetchRentPrices(cc);
 };
 
+// FIX 1: Define missing variables in executeRentNumber
 window.executeRentNumber = async function() {
   if (rentCountryAvailable !== true) {
     if (rentCountryAvailable === null) showToast('Please wait...', 'info');
@@ -1547,43 +1574,99 @@ window.executeRentNumber = async function() {
     if (btn) btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Renting...';
 
     var ad = await window.smsbusCreateRent(cc, selectedRentMonths, ue);
-    var oi = ad.order_id || ad.id;
-    var pn = ad.mobile_number || ad.phone || ad.number || '';
+    
+    // FIX: Define these variables properly
+    var ri = ad.order_id || ad.id || 'rental-' + Date.now();
+    var sf = ad.order_id || ad.id || ri;
+    var rawPhone = String(ad.mobile_number || ad.phone || ad.number || '');
     var dc = ad.dialing_code || '';
-    var ea = ad.expire_at || ad.expiresAt || '';
+    var ea = ad.expire_at || ad.expiresAt || null;
 
-    if (!oi || !pn) throw new Error('Invalid API response');
+    var dialCode = (cd && cd.dial_code) ? cd.dial_code.replace('+', '') : '';
+    var pn = rawPhone;
+    if (dialCode && pn.indexOf(dialCode) !== 0) {
+      pn = dialCode + pn;
+    }
+    if (pn.charAt(0) !== '+') {
+      pn = '+' + pn;
+    }
 
-    var ri = oi;
-    var sf = getRentAreaCode(cc) + ':' + pn;
-
-    var sr = await fetch('/api/rentals/save', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        email: ue, rentId: ri, smsFetchId: sf, phone: pn, dialingCode: dc,
-        planName: selectedRentMonths + ' Month' + (selectedRentMonths > 1 ? 's' : ''),
-        durationMonths: selectedRentMonths, providerCost: tp, cost: ttl,
-        countryCode: cc, countryFlag: cf, countryName: cn, status: 'active',
-        expiresAt: ea || new Date(Date.now() + selectedRentMonths * 30 * 24 * 3600000).toISOString(),
-        createdAt: new Date().toISOString()
-      })
-    });
-
-    var sd = await sr.json();
-    if (sd.balance !== undefined) window.updateBalanceDisplay(sd.balance);
-
-    var re = sd.rental || {
-      id: ri, smsFetchId: sf, phone: pn, countryCode: cc, countryFlag: cf,
-      planName: selectedRentMonths + 'M', durationMonths: selectedRentMonths, cost: ttl,
+    // Create the rental object FIRST with all required fields
+    var newRental = {
+      id: ri,
+      smsFetchId: sf,
+      phone: pn,
+      dialingCode: dc,
+      countryCode: cc,
+      countryFlag: cf,
+      countryName: cn,
+      planName: selectedRentMonths + ' Month' + (selectedRentMonths > 1 ? 's' : ''),
+      durationMonths: selectedRentMonths,
+      providerCost: tp,
+      cost: ttl,
       status: 'active',
       expiresAt: ea || new Date(Date.now() + selectedRentMonths * 30 * 24 * 3600000).toISOString(),
+      createdAt: new Date().toISOString(),
       sms: []
     };
 
-    activeRentals.push(re);
+    // Add to local array BEFORE saving to server
+    activeRentals.unshift(newRental);
+    
+    // Backup to localStorage immediately (removed duplicate code)
+    try {
+      var backupEmail = (typeof getUserEmail === 'function') ? getUserEmail() : '';
+      if (backupEmail) {
+        localStorage.setItem('active_rentals_' + backupEmail, JSON.stringify(activeRentals));
+      }
+    } catch(e) {}
+
+    try {
+      var sr = await fetch('/api/rentals/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: ue,
+          rentId: ri,
+          smsFetchId: sf,
+          phone: pn,
+          dialingCode: dc,
+          planName: newRental.planName,
+          durationMonths: selectedRentMonths,
+          providerCost: tp,
+          cost: ttl,
+          countryCode: cc,
+          countryFlag: cf,
+          countryName: cn,
+          status: 'active',
+          expiresAt: newRental.expiresAt,
+          createdAt: newRental.createdAt
+        })
+      });
+
+      var sd = await sr.json();
+      if (sd.balance !== undefined && typeof window.updateBalanceDisplay === 'function') {
+        window.updateBalanceDisplay(sd.balance);
+      }
+      
+      // If server returns the saved rental with an ID, update our local copy
+      if (sd.rental && sd.rental.id) {
+        var idx = activeRentals.findIndex(function(r) { return r.id === ri; });
+        if (idx !== -1) {
+          activeRentals[idx] = Object.assign({}, activeRentals[idx], sd.rental);
+        }
+      }
+    } catch (saveErr) {
+      console.warn('Failed to save rental to server, keeping local copy:', saveErr.message);
+    }
+
     showToast('Number rented! +' + pn + ' -$' + ttl.toFixed(2), 'success');
-    if (typeof renderMainContent === 'function') renderMainContent();
+    
+    // Re-render just the rent page
+    var main = document.getElementById('appContent') || document.getElementById('mainContent');
+    if (main) {
+      renderRentPage(main);
+    }
   } catch (err) {
     console.error('Rent error:', err);
     showToast(err.message || 'Failed to rent', 'error');
@@ -1593,48 +1676,33 @@ window.executeRentNumber = async function() {
   }
 };
 
-window.refreshRentalSms = async function(ri) {
-  var r = activeRentals.find(function(x) { return x.id === ri; });
-  if (!r) return;
-  var fb = event ? event.target.closest('button') : null;
-  if (fb) { fb.innerHTML = '<i class="fas fa-spinner fa-spin"></i>'; fb.disabled = true; }
-  try {
-    var d = await window.smsbusGetRentStatus(r.smsFetchId || r.id);
-    var hn = false;
-    r.sms = r.sms || [];
-    if (d && d.content) {
-      if (!r.sms.some(function(s) { return s.text === d.content; })) {
-        r.sms.unshift({ sender: 'Unknown', text: d.content, receivedAt: d.receive_at || new Date().toISOString() });
-        hn = true;
-      }
-    }
-    if (d && d.list && Array.isArray(d.list)) {
-      d.list.forEach(function(as) {
-        if (!r.sms.some(function(s) { return s.text === (as.content || as.text); })) {
-          r.sms.unshift({ sender: as.sender || 'Unknown', text: as.content || as.text || '', receivedAt: as.receive_at || as.created_at || new Date().toISOString() });
-          hn = true;
-        }
-      });
-    }
-    if (hn) {
-      showToast('New SMS!', 'success');
-      if (typeof renderMainContent === 'function') renderMainContent();
-    } else showToast('No new SMS', 'info');
-  } catch (e) {
-    showToast('Failed: ' + e.message, 'error');
-  } finally {
-    if (fb) { fb.innerHTML = '<i class="fas fa-sync-alt"></i> Refresh'; fb.disabled = false; }
-  }
-};
 
+// FIX 2: Remove duplicate declaration
+// var currentRentalDetailId = null;  // REMOVE THIS LINE (appears twice)
+
+
+// FIX 3: Correct variable reference in cancelRental
 window.cancelRental = async function(ri) {
+  var rental = activeRentals.find(function(r) { return r.id === ri; });
+  if (rental && rental.sms && rental.sms.length > 0) {
+    showToast('Cannot cancel — SMS already received on this number', 'error');
+    return;
+  }
   if (!confirm('Cancel this rental?')) return;
   try {
-    await window.smsbusCancelRent(ri);
-    var dr = await fetch('/api/rental/' + ri, { method: 'DELETE' });
+    await window.smsbusCancelRent(ri);  // FIX: Changed rentalId to ri
+    var dr = await fetch('/api/rental/' + ri, { method: 'DELETE' });  // FIX: Changed rentalId to ri
     var d = await dr.json();
-    if (d.balance !== undefined) window.updateBalanceDisplay(d.balance);
     activeRentals = activeRentals.filter(function(r) { return r.id !== ri; });
+    
+    // Update localStorage backup
+    try {
+      var backupEmail = (typeof getUserEmail === 'function') ? getUserEmail() : '';
+      if (backupEmail) {
+        localStorage.setItem('active_rentals_' + backupEmail, JSON.stringify(activeRentals));
+      }
+    } catch(e) {}
+    
     showToast('Rental cancelled', 'info');
     if (typeof renderMainContent === 'function') renderMainContent();
   } catch (e) {
@@ -1642,23 +1710,15 @@ window.cancelRental = async function(ri) {
   }
 };
 
-window.loadActiveRentals = function() {
-  var ue = (typeof getUserEmail === 'function') ? getUserEmail() : '';
-  if (!ue) return;
-  fetch('/api/rentals/' + ue, {
-    headers: { 'Accept': 'application/json' }
-  })
-    .then(function(r) {
-      if (!r.ok) throw new Error('Server error');
-      return r.json();
-    })
-    .then(function(d) {
-      if (Array.isArray(d)) activeRentals = d;
-    })
-    .catch(function(err) {
-      console.warn('Failed to load rentals:', err.message);
-      activeRentals = [];
-    });
+
+// FIX 4: Fix undefined variable m in getPageFromHash
+window.getPageFromHash = function() {
+  var h = window.location.hash.replace('#', '').trim();
+  if (h.indexOf('shared-card=') === 0) return 'shared-card';
+  // FIX: Use a default mapping or just return h directly
+  var validPages = ['numbers', 'rent', 'cards', 'history', 'settings', 'add-funds', 'profile'];
+  if (validPages.indexOf(h) !== -1) return h;
+  return 'numbers';  // Default page
 };
 
 
@@ -1673,6 +1733,487 @@ window.loadActiveRentals = function() {
   document.head.appendChild(style);
 })();
 
+// =======================================================================
+// ===== RENTAL DETAILS PAGE =====
+// =======================================================================
+var currentRentalDetailId = null;
+
+var currentRentalDetailId = null;
+
+window.showRentalDetails = function(rentalId) {
+  currentRentalDetailId = rentalId;
+  var rental = activeRentals.find(function(r) { return r.id === rentalId; });
+  if (!rental) { showToast('Rental not found', 'error'); return; }
+
+  var main = document.getElementById('appContent') || document.getElementById('mainContent');
+  if (!main) return;
+
+  var phone = rental.phone || '';
+  var displayPhone = phone.charAt(0) !== '+' ? '+' + phone : phone;
+  var flag = rental.countryFlag || '🌍';
+  var countryName = rental.countryName || 'Unknown';
+  var countryCode = rental.countryCode || '';
+  var status = rental.status || 'active';
+  var isActive = status === 'active';
+  var statusColor = isActive ? '#0d9b7a' : '#d93025';
+  var statusBg = isActive ? 'rgba(13,155,122,0.1)' : 'rgba(217,48,37,0.1)';
+  var statusBorder = isActive ? 'rgba(13,155,122,0.2)' : 'rgba(217,48,37,0.2)';
+  var statusText = isActive ? 'Online' : 'Offline';
+  var statusDot = isActive ? '#0d9b7a' : '#d93025';
+
+  var createdAt = rental.createdAt ? new Date(rental.createdAt) : new Date();
+  var expiresAt = rental.expiresAt ? new Date(rental.expiresAt) : new Date(Date.now() + 30 * 24 * 3600000);
+  var now = new Date();
+  var hoursLeft = Math.max(0, Math.floor((expiresAt - now) / (1000 * 60 * 60)));
+  var daysLeft = Math.floor(hoursLeft / 24);
+  var hrsLeft = hoursLeft % 24;
+  var timeLeftStr = daysLeft > 0 ? daysLeft + 'd ' + hrsLeft + 'h' : hrsLeft + 'h';
+
+  var cost = typeof rental.cost === 'number' ? rental.cost : 0;
+  var planName = rental.planName || '1 Month';
+  var orderId = rental.id || 'N/A';
+  var smsFetchId = rental.smsFetchId || rental.id || '';
+
+  var accessLink = window.location.origin + window.location.pathname + '#rent-access=' + smsFetchId;
+  var savedNote = rental.note || '';
+
+  var smsList = rental.sms || [];
+  var hasSms = smsList.length > 0;
+  var canCancel = !hasSms;
+
+  var smsHtml = '';
+  if (hasSms) {
+    smsHtml = smsList.map(function(s) {
+      var st = s.receivedAt ? new Date(s.receivedAt) : new Date();
+      var timeStr = st.toLocaleDateString() + ' ' + st.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      return '<div style="padding:14px 16px;background:var(--bg-primary);border:1px solid var(--border);border-radius:12px;margin-bottom:8px;">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
+          '<span style="font-size:11px;font-weight:700;color:var(--accent);background:var(--accent-dim);padding:3px 10px;border-radius:6px;letter-spacing:0.3px;">FROM: ' + (s.sender || 'UNKNOWN') + '</span>' +
+          '<span style="font-size:11px;color:var(--text-muted);">' + timeStr + '</span>' +
+        '</div>' +
+        '<div style="font-size:14px;color:var(--text-primary);line-height:1.6;word-break:break-word;font-weight:500;letter-spacing:0.3px;">' + (s.text || '') + '</div>' +
+      '</div>';
+    }).join('');
+  } else {
+    smsHtml = '<div style="text-align:center;padding:48px 20px;">' +
+      '<div style="width:56px;height:56px;border-radius:16px;background:rgba(255,255,255,0.03);display:flex;align-items:center;justify-content:center;margin:0 auto 14px;border:1px dashed rgba(255,255,255,0.08);"><i class="far fa-comment-dots" style="font-size:22px;color:var(--text-muted);opacity:0.3;"></i></div>' +
+      '<p style="font-size:14px;color:var(--text-muted);margin:0;font-weight:500;">No SMS received yet</p>' +
+      '<p style="font-size:12px;color:var(--text-muted);opacity:0.5;margin:4px 0 0;">Messages will appear here automatically</p>' +
+    '</div>';
+  }
+
+  var cancelBtnHtml = canCancel
+    ? '<button onclick="cancelRentalFromDetail(\'' + rentalId + '\')" style="padding:12px;background:rgba(217,48,37,0.05);border:1px solid rgba(217,48,37,0.15);border-radius:10px;color:var(--danger);font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;transition:all 0.2s;" onmouseover="this.style.background=\'rgba(217,48,37,0.1)\'" onmouseout="this.style.background=\'rgba(217,48,37,0.05)\'"><i class="fas fa-times"></i> Cancel</button>'
+    : '<div style="padding:12px;background:var(--bg-primary);border:1px solid var(--border);border-radius:10px;display:flex;align-items:center;justify-content:center;gap:6px;opacity:0.35;cursor:not-allowed;"><i class="fas fa-lock" style="font-size:10px;"></i><span style="font-size:12px;font-weight:600;color:var(--text-muted);">Locked</span></div>';
+
+  var cancelReasonHtml = !canCancel
+    ? '<div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.12);border-radius:10px;margin-top:10px;"><i class="fas fa-shield-alt" style="color:#f59e0b;font-size:12px;flex-shrink:0;"></i><span style="font-size:11px;color:var(--text-secondary);line-height:1.4;">Cancellation is locked after receiving SMS to protect verification sessions.</span></div>'
+    : '';
+
+  var renewOptions = [1, 2, 3, 5, 12].map(function(m) {
+    var renewCost = currentRentDollarsPerMonth > 0 ? addRentProfit(currentRentDollarsPerMonth * m) : 0;
+    return '<button onclick="selectRenewMonths(' + m + ')" class="renew-opt-btn" id="renewOpt' + m + '" style="padding:10px 16px;background:var(--bg-primary);border:2px solid var(--border);border-radius:10px;color:var(--text-secondary);font-size:13px;font-weight:600;cursor:pointer;transition:all 0.2s;">' +
+      m + ' Mo' + (renewCost > 0 ? '<div style="font-size:10px;color:var(--text-muted);font-weight:400;margin-top:2px;">$' + renewCost.toFixed(2) + '</div>' : '') +
+    '</button>';
+  }).join('');
+
+  main.innerHTML =
+    '<div style="max-width:860px;margin:0 auto;padding:0 16px;">' +
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:24px;">' +
+        '<button onclick="closeRentalDetails()" style="width:38px;height:38px;border-radius:12px;background:var(--bg-card);border:1px solid var(--border);color:var(--text-secondary);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:14px;flex-shrink:0;transition:all 0.2s;" onmouseover="this.style.borderColor=\'var(--accent)\';this.style.color=\'var(--accent)\'" onmouseout="this.style.borderColor=\'var(--border)\';this.style.color=\'var(--text-secondary)\'"><i class="fas fa-arrow-left"></i></button>' +
+        '<div style="flex:1;"><h1 style="font-size:20px;font-weight:700;color:var(--text-primary);margin:0;">Number Details</h1></div>' +
+        '<button onclick="refreshDetailSms(\'' + rentalId + '\')" style="padding:8px 14px;background:var(--bg-card);border:1px solid var(--border);border-radius:10px;color:var(--text-secondary);font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px;transition:all 0.2s;" onmouseover="this.style.borderColor=\'var(--accent)\';this.style.color=\'var(--accent)\'" onmouseout="this.style.borderColor=\'var(--border)\';this.style.color=\'var(--text-secondary)\'"><i class="fas fa-sync-alt" style="font-size:10px;"></i> Refresh</button>' +
+      '</div>' +
+
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px;" class="detail-grid">' +
+
+        '<!-- Left Column -->' +
+        '<div style="display:flex;flex-direction:column;gap:20px;">' +
+          '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:18px;overflow:hidden;">' +
+            '<div style="padding:24px 20px;text-align:center;border-bottom:1px solid var(--border);">' +
+              '<span style="font-size:40px;display:block;margin-bottom:12px;">' + flag + '</span>' +
+              '<div style="font-family:\'Courier New\',monospace;font-size:22px;font-weight:800;color:var(--text-primary);letter-spacing:1.5px;margin-bottom:4px;">' + displayPhone + '</div>' +
+              '<div style="font-size:13px;color:var(--text-muted);">' + countryName + '</div>' +
+              '<div style="display:inline-flex;align-items:center;gap:6px;padding:5px 14px;background:' + statusBg + ';border:1px solid ' + statusBorder + ';border-radius:20px;margin-top:12px;">' +
+                '<span style="width:7px;height:7px;border-radius:50%;background:' + statusDot + ';' + (isActive ? 'animation:pulse-dot 2s infinite;' : '') + '"></span>' +
+                '<span style="font-size:12px;font-weight:700;color:' + statusColor + ';letter-spacing:0.5px;">' + statusText.toUpperCase() + '</span>' +
+              '</div>' +
+            '</div>' +
+            '<div style="padding:16px 20px;">' +
+              '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">' +
+                '<div style="padding:12px;background:var(--bg-primary);border-radius:12px;border:1px solid var(--border);">' +
+                  '<div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Activated</div>' +
+                  '<div style="font-size:13px;font-weight:700;color:var(--text-primary);">' + createdAt.toLocaleDateString() + '</div>' +
+                  '<div style="font-size:11px;color:var(--text-muted);">' + createdAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + '</div>' +
+                '</div>' +
+                '<div style="padding:12px;background:var(--bg-primary);border-radius:12px;border:1px solid var(--border);">' +
+                  '<div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Expires</div>' +
+                  '<div style="font-size:13px;font-weight:700;color:var(--text-primary);">' + expiresAt.toLocaleDateString() + '</div>' +
+                  '<div style="font-size:11px;color:var(--danger);font-weight:700;">' + timeLeftStr + ' left</div>' +
+                '</div>' +
+              '</div>' +
+            '</div>' +
+          '</div>' +
+
+          '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:18px;overflow:hidden;">' +
+            '<div style="padding:14px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;">' +
+              '<i class="fas fa-link" style="color:var(--accent);font-size:12px;"></i>' +
+              '<span style="font-size:13px;font-weight:700;color:var(--text-primary);">Access Link</span>' +
+            '</div>' +
+            '<div style="padding:14px 20px;">' +
+              '<div style="position:relative;">' +
+                '<input type="text" id="rentalAccessLink" value="' + accessLink + '" readonly style="width:100%;padding:10px 44px 10px 14px;background:var(--bg-primary);border:1px solid var(--border);border-radius:10px;color:var(--text-muted);font-size:11px;outline:none;font-family:\'Courier New\',monospace;" onclick="this.select()">' +
+                '<button onclick="copyRentalAccessLink()" style="position:absolute;right:4px;top:50%;transform:translateY(-50%);padding:7px 10px;background:var(--accent);color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:11px;"><i class="fas fa-copy"></i></button>' +
+              '</div>' +
+            '</div>' +
+          '</div>' +
+
+          '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:18px;overflow:hidden;">' +
+            '<div style="padding:14px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;">' +
+              '<i class="fas fa-sticky-note" style="color:var(--accent);font-size:12px;"></i>' +
+              '<span style="font-size:13px;font-weight:700;color:var(--text-primary);">Notes</span>' +
+            '</div>' +
+            '<div style="padding:14px 20px;">' +
+              '<textarea id="rentalNoteInput" placeholder="Add notes for this number..." rows="2" style="width:100%;padding:10px 14px;background:var(--bg-primary);border:1px solid var(--border);border-radius:10px;color:var(--text-primary);font-size:13px;outline:none;resize:vertical;min-height:50px;font-family:inherit;transition:border-color 0.2s;" onfocus="this.style.borderColor=\'var(--accent)\'" onblur="this.style.borderColor=\'var(--border)\';saveRentalNote(\'' + rentalId + '\',this.value)">' + savedNote + '</textarea>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+
+        '<!-- Right Column -->' +
+        '<div style="display:flex;flex-direction:column;gap:20px;">' +
+          '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:18px;overflow:hidden;">' +
+            '<div style="padding:14px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;">' +
+              '<i class="fas fa-receipt" style="color:var(--accent);font-size:12px;"></i>' +
+              '<span style="font-size:13px;font-weight:700;color:var(--text-primary);">Order History</span>' +
+            '</div>' +
+            '<div style="padding:16px 20px;">' +
+              '<div style="padding:14px 16px;background:var(--bg-primary);border:1px solid var(--border);border-radius:12px;">' +
+                '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">' +
+                  '<span style="font-size:11px;color:var(--text-muted);">Order ID</span>' +
+                  '<span style="font-size:11px;font-weight:700;color:var(--text-primary);font-family:\'Courier New\',monospace;letter-spacing:0.3px;">' + orderId + '</span>' +
+                '</div>' +
+                '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">' +
+                  '<span style="font-size:11px;color:var(--text-muted);">Status</span>' +
+                  '<span style="font-size:10px;font-weight:700;color:#0d9b7a;background:rgba(13,155,122,0.1);padding:3px 10px;border-radius:6px;letter-spacing:0.3px;">COMPLETED</span>' +
+                '</div>' +
+                '<div style="height:1px;background:var(--border);margin:12px 0;"></div>' +
+                '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">' +
+                  '<span style="font-size:11px;color:var(--text-muted);">Amount</span>' +
+                  '<span style="font-size:16px;font-weight:800;color:var(--accent);">$' + cost.toFixed(2) + '</span>' +
+                '</div>' +
+                '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">' +
+                  '<span style="font-size:11px;color:var(--text-muted);">Duration</span>' +
+                  '<span style="font-size:12px;font-weight:600;color:var(--text-primary);">' + planName + '</span>' +
+                '</div>' +
+                '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+                  '<span style="font-size:11px;color:var(--text-muted);">Date</span>' +
+                  '<span style="font-size:12px;color:var(--text-secondary);">' + createdAt.toLocaleDateString() + '</span>' +
+                '</div>' +
+              '</div>' +
+            '</div>' +
+          '</div>' +
+
+          '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:18px;overflow:hidden;">' +
+            '<div style="padding:14px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;">' +
+              '<i class="fas fa-bolt" style="color:var(--accent);font-size:12px;"></i>' +
+              '<span style="font-size:13px;font-weight:700;color:var(--text-primary);">Actions</span>' +
+            '</div>' +
+            '<div style="padding:14px 20px;display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
+              '<button onclick="copyRentalPhone(\'' + displayPhone + '\')" style="padding:12px;background:var(--bg-primary);border:1px solid var(--border);border-radius:10px;color:var(--text-secondary);font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;transition:all 0.2s;" onmouseover="this.style.borderColor=\'var(--accent)\';this.style.color=\'var(--accent)\'" onmouseout="this.style.borderColor=\'var(--border)\';this.style.color=\'var(--text-secondary)\'"><i class="fas fa-copy"></i> Copy</button>' +
+              '<button onclick="shareRentalNumber(\'' + displayPhone + '\')" style="padding:12px;background:var(--bg-primary);border:1px solid var(--border);border-radius:10px;color:var(--text-secondary);font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;transition:all 0.2s;" onmouseover="this.style.borderColor=\'var(--accent)\';this.style.color=\'var(--accent)\'" onmouseout="this.style.borderColor=\'var(--border)\';this.style.color=\'var(--text-secondary)\'"><i class="fas fa-share-alt"></i> Share</button>' +
+              cancelBtnHtml +
+              (canCancel
+                ? '<div></div>'
+                : '<div></div>') +
+            '</div>' +
+            cancelReasonHtml +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+
+      '<!-- SMS Section -->' +
+      '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:18px;overflow:hidden;margin-bottom:24px;">' +
+        '<div style="padding:14px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">' +
+          '<div style="display:flex;align-items:center;gap:8px;">' +
+            '<i class="fas fa-envelope" style="color:var(--accent);font-size:12px;"></i>' +
+            '<span style="font-size:13px;font-weight:700;color:var(--text-primary);">SMS Messages</span>' +
+            '<span style="font-size:10px;padding:2px 8px;border-radius:8px;font-weight:700;background:var(--accent-dim);color:var(--accent);">' + smsList.length + '</span>' +
+          '</div>' +
+        '</div>' +
+        '<div style="padding:16px 20px;max-height:380px;overflow-y:auto;" id="detailSmsContainer">' + smsHtml + '</div>' +
+      '</div>' +
+
+      '<!-- Renew Section -->' +
+      '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:18px;overflow:hidden;">' +
+        '<div style="padding:14px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;">' +
+          '<i class="fas fa-redo" style="color:var(--accent);font-size:12px;"></i>' +
+          '<span style="font-size:13px;font-weight:700;color:var(--text-primary);">Renew</span>' +
+        '</div>' +
+        '<div style="padding:16px 20px;">' +
+          '<div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;" id="renewOptionsWrap">' + renewOptions + '</div>' +
+          '<div id="renewSummary" style="display:none;padding:14px;background:var(--bg-primary);border:1px solid var(--border);border-radius:12px;margin-bottom:14px;">' +
+            '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+              '<span style="font-size:13px;color:var(--text-muted);">Renewal cost:</span>' +
+              '<span id="renewTotalCost" style="font-size:18px;font-weight:800;color:var(--accent);">$0.00</span>' +
+            '</div>' +
+          '</div>' +
+          '<button id="renewNowBtn" disabled onclick="executeRenewRental(\'' + rentalId + '\')" style="width:100%;padding:13px;background:var(--bg-card);color:var(--text-muted);border:1px solid var(--border);border-radius:12px;font-size:13px;font-weight:600;cursor:not-allowed;display:flex;align-items:center;justify-content:center;gap:8px;transition:all 0.2s;"><i class="fas fa-redo"></i> Select duration</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+
+  if (!document.getElementById('rental-detail-styles')) {
+    var st = document.createElement('style');
+    st.id = 'rental-detail-styles';
+    st.textContent = '@keyframes pulse-dot{0%,100%{opacity:1}50%{opacity:0.4}}.detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}@media(max-width:700px){.detail-grid{grid-template-columns:1fr}}.renew-opt-btn.selected{border-color:var(--accent)!important;background:var(--accent-dim)!important;color:var(--accent)!important}';
+    document.head.appendChild(st);
+  }
+};
+
+window.closeRentalDetails = function() {
+  currentRentalDetailId = null;
+  selectedRenewMonths = 0;
+  if (typeof renderMainContent === 'function') renderMainContent();
+};
+
+window.copyRentalAccessLink = function() {
+  var input = document.getElementById('rentalAccessLink');
+  if (!input) return;
+  input.select();
+  navigator.clipboard.writeText(input.value).then(function() {
+    showToast('Access link copied!', 'success');
+  }).catch(function() {
+    document.execCommand('copy');
+    showToast('Access link copied!', 'success');
+  });
+};
+
+window.copyRentalPhone = function(phone) {
+  navigator.clipboard.writeText(phone).then(function() {
+    showToast('Number copied: ' + phone, 'success');
+  }).catch(function() {
+    showToast('Failed to copy', 'error');
+  });
+};
+
+window.shareRentalNumber = function(phone) {
+  var text = 'My rented number: ' + phone;
+  if (navigator.share) {
+    navigator.share({ title: 'Rented Number', text: text }).catch(function() {});
+  } else {
+    navigator.clipboard.writeText(text).then(function() {
+      showToast('Number copied to clipboard!', 'success');
+    }).catch(function() {
+      showToast('Failed to copy', 'error');
+    });
+  }
+};
+
+window.saveRentalNote = function(rentalId, note) {
+  var rental = activeRentals.find(function(r) { return r.id === rentalId; });
+  if (!rental) return;
+  rental.note = note;
+  var ue = (typeof getUserEmail === 'function') ? getUserEmail() : '';
+  if (!ue) return;
+  fetch('/api/rentals/note', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: ue, rentalId: rentalId, note: note })
+  }).catch(function() {});
+};
+
+var selectedRenewMonths = 0;
+
+window.selectRenewMonths = function(months) {
+  selectedRenewMonths = months;
+  var opts = document.querySelectorAll('.renew-opt-btn');
+  opts.forEach(function(btn) {
+    btn.classList.remove('selected');
+    btn.style.borderColor = 'var(--border)';
+    btn.style.background = 'var(--bg-primary)';
+    btn.style.color = 'var(--text-secondary)';
+  });
+  var selBtn = document.getElementById('renewOpt' + months);
+  if (selBtn) {
+    selBtn.classList.add('selected');
+    selBtn.style.borderColor = 'var(--accent)';
+    selBtn.style.background = 'var(--accent-dim)';
+    selBtn.style.color = 'var(--accent)';
+  }
+
+  var summary = document.getElementById('renewSummary');
+  var totalEl = document.getElementById('renewTotalCost');
+  var btn = document.getElementById('renewNowBtn');
+  if (summary && totalEl && btn) {
+    var cost = currentRentDollarsPerMonth > 0 ? addRentProfit(currentRentDollarsPerMonth * months) : 0;
+    totalEl.textContent = '$' + cost.toFixed(2);
+    summary.style.display = 'block';
+    btn.disabled = false;
+    btn.style.background = 'var(--accent)';
+    btn.style.color = '#fff';
+    btn.style.border = 'none';
+    btn.style.cursor = 'pointer';
+    btn.innerHTML = '<i class="fas fa-redo"></i> Renew for ' + months + ' Month' + (months > 1 ? 's' : '') + ' — $' + cost.toFixed(2);
+  }
+};
+
+window.executeRenewRental = async function(rentalId) {
+  if (selectedRenewMonths <= 0) return;
+  var btn = document.getElementById('renewNowBtn');
+  if (btn) { btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...'; btn.disabled = true; }
+  try {
+    var ue = (typeof getUserEmail === 'function') ? getUserEmail() : '';
+    if (!ue) { showToast('Please log in', 'error'); if (btn) { btn.innerHTML = '<i class="fas fa-redo"></i> Renew'; btn.disabled = false; } return; }
+
+    var renewCost = currentRentDollarsPerMonth > 0 ? addRentProfit(currentRentDollarsPerMonth * selectedRenewMonths) : 0;
+    var ur = await fetch('/api/user/' + ue);
+    var ud = await ur.json();
+    var sb = parseFloat(ud.balance) || 0;
+    if (typeof window.updateBalanceDisplay === 'function') window.updateBalanceDisplay(sb);
+    if (sb < renewCost) {
+      showInsufficientBalanceWarning(renewCost, sb);
+      if (btn) { btn.innerHTML = '<i class="fas fa-redo"></i> Renew'; btn.disabled = false; }
+      return;
+    }
+
+    var rental = activeRentals.find(function(r) { return r.id === rentalId; });
+    var cc = rental ? rental.countryCode : 'us';
+
+    if (btn) btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Contacting provider...';
+
+    var ad = await window.smsbusCreateRent(cc, selectedRenewMonths, ue);
+    var newExpires = ad.expire_at || ad.expiresAt || new Date(Date.now() + selectedRenewMonths * 30 * 24 * 3600000).toISOString();
+
+    if (rental) {
+      rental.expiresAt = newExpires;
+      rental.durationMonths = (rental.durationMonths || 0) + selectedRenewMonths;
+      rental.planName = rental.durationMonths + ' Month' + (rental.durationMonths > 1 ? 's' : '');
+      rental.cost = (rental.cost || 0) + renewCost;
+    }
+
+    await fetch('/api/rentals/renew', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: ue, rentalId: rentalId, months: selectedRenewMonths, cost: renewCost, newExpiresAt: newExpires })
+    }).then(function(r) { return r.json(); }).then(function(d) {
+      if (d.balance !== undefined && typeof window.updateBalanceDisplay === 'function') window.updateBalanceDisplay(d.balance);
+    }).catch(function() {});
+
+    showToast('Renewed for ' + selectedRenewMonths + ' month(s)! -$' + renewCost.toFixed(2), 'success');
+    selectedRenewMonths = 0;
+    window.showRentalDetails(rentalId);
+  } catch (err) {
+    console.error('Renew error:', err);
+    showToast(err.message || 'Renewal failed', 'error');
+    if (btn) { btn.innerHTML = '<i class="fas fa-redo"></i> Renew'; btn.disabled = false; }
+  }
+};
+
+window.refreshDetailSms = async function(rentalId) {
+  var rental = activeRentals.find(function(r) { return r.id === rentalId; });
+  if (!rental) return;
+  var container = document.getElementById('detailSmsContainer');
+  if (container) container.innerHTML = '<div style="text-align:center;padding:30px;"><i class="fas fa-spinner fa-spin" style="font-size:20px;color:var(--accent);"></i></div>';
+  try {
+    var d = await window.smsbusGetRentStatus(rental.smsFetchId || rental.id);
+    var hasNew = false;
+    rental.sms = rental.sms || [];
+    if (d && d.content) {
+      if (!rental.sms.some(function(s) { return s.text === d.content; })) {
+        rental.sms.unshift({ sender: 'Unknown', text: d.content, receivedAt: d.receive_at || new Date().toISOString() });
+        hasNew = true;
+      }
+    }
+    if (d && d.list && Array.isArray(d.list)) {
+      d.list.forEach(function(as) {
+        if (!rental.sms.some(function(s) { return s.text === (as.content || as.text); })) {
+          rental.sms.unshift({ sender: as.sender || 'Unknown', text: as.content || as.text || '', receivedAt: as.receive_at || as.created_at || new Date().toISOString() });
+          hasNew = true;
+        }
+      });
+    }
+    if (hasNew) {
+      showToast('New SMS received!', 'success');
+    } else {
+      showToast('No new messages', 'info');
+    }
+    window.showRentalDetails(rentalId);
+  } catch (e) {
+    showToast('Failed: ' + e.message, 'error');
+    window.showRentalDetails(rentalId);
+  }
+};
+
+window.cancelRental = async function(ri) {
+  var rental = activeRentals.find(function(r) { return r.id === ri; });
+  if (rental && rental.sms && rental.sms.length > 0) {
+    showToast('Cannot cancel — SMS already received on this number', 'error');
+    return;
+  }
+  if (!confirm('Cancel this rental?')) return;
+  try {
+    await window.smsbusCancelRent(rentalId);
+    var dr = await fetch('/api/rental/' + rentalId, { method: 'DELETE' });
+    var d = await dr.json();
+            activeRentals = activeRentals.filter(function(r) { return r.id !== ri; });
+    
+    try {
+      var backupEmail = (typeof getUserEmail === 'function') ? getUserEmail() : '';
+      if (backupEmail) {
+        localStorage.setItem('active_rentals_' + backupEmail, JSON.stringify(activeRentals));
+      }
+    } catch(e) {}
+    
+    // Update localStorage backup
+    try {
+      var backupEmail = (typeof getUserEmail === 'function') ? getUserEmail() : '';
+      if (backupEmail) {
+        localStorage.setItem('active_rentals_' + backupEmail, JSON.stringify(activeRentals));
+      }
+    } catch(e) {}
+    showToast('Rental cancelled', 'info');
+    if (typeof renderMainContent === 'function') renderMainContent();
+  } catch (e) {
+    showToast('Failed: ' + e.message, 'error');
+  }
+};
+
+window.loadActiveRentals = function() {
+  var ue = (typeof getUserEmail === 'function') ? getUserEmail() : '';
+  if (!ue) return Promise.resolve();
+  
+  return fetch('/api/rentals/' + ue, {
+    headers: { 'Accept': 'application/json' }
+  })
+    .then(function(r) {
+      if (!r.ok) throw new Error('Server error');
+      return r.json();
+    })
+    .then(function(d) {
+      if (!Array.isArray(d)) return;
+      
+      var localIds = activeRentals.map(function(r) { return r.id; });
+      
+      // ONLY add server rentals we don't have locally
+      // NEVER remove local rentals - they may be newer than server
+      d.forEach(function(serverR) {
+        if (localIds.indexOf(serverR.id) === -1) {
+          activeRentals.push(serverR);
+        }
+      });
+      
+      // Sort newest first (handle both createdAt and created_at)
+      activeRentals.sort(function(a, b) {
+        var aTime = new Date(a.createdAt || a.created_at || 0).getTime();
+        var bTime = new Date(b.createdAt || b.created_at || 0).getTime();
+        return bTime - aTime;
+      });
+    })
+    .catch(function(err) {
+      console.warn('Failed to load rentals:', err.message);
+      // NEVER clear activeRentals on error - keep local data
+    });
+};
 
 // =======================================================================
 // ===== ROUTER =====
@@ -1683,51 +2224,27 @@ window.renderSharedCardPage = renderSharedCardPage;
 
 var _origPreLoad = window.preLoadPageData;
 window.preLoadPageData = function(page) {
-  if (page === 'rent') return Promise.all([(typeof loadBalance === 'function' ? loadBalance() : Promise.resolve()), loadActiveRentals(), window.fetchRentCountries()]);
-  if (page === 'cards') {
-    addCardStyles();
-    return loadUserCards().then(function() {
-      return typeof loadBalance === 'function' ? loadBalance() : Promise.resolve();
-    });
-  }
+  if (page === 'rent') return Promise.all([
+    (typeof loadBalance === 'function' ? loadBalance() : Promise.resolve()), 
+    loadActiveRentals(),  // This now returns a Promise
+    window.fetchRentCountries()
+  ]);
   if (page === 'shared-card') return Promise.resolve();
   if (_origPreLoad) return _origPreLoad(page);
   return Promise.resolve();
 };
 
+
 var _origGetPage = typeof getPageFromHash === 'function' ? getPageFromHash : null;
 window.getPageFromHash = function() {
   var h = window.location.hash.replace('#', '').trim();
   if (h.indexOf('shared-card=') === 0) return 'shared-card';
-  var m = {
-    'numbers': 'numbers', 'home': 'numbers', 'add-funds': 'deposit', 'deposit': 'deposit',
-    'history': 'history', 'referral': 'settings', 'settings': 'settings', 'help': 'help',
-    'contacts': 'contacts', 'rent': 'rent', 'cards': 'cards'
-  };
+// Legacy compatibility - old code might call loadHistory()
+window.loadHistory = function() {
+  return loadUnifiedHistory();
+};
   return m[h] || h || 'numbers';
 };
 
-var _origBoot = window.bootSequence;
-window.bootSequence = function() {
-  var local = loadCardsFromLocal();
-  if (local && Array.isArray(local)) {
-    userCards = local;
-    cardsLoaded = true;
-    console.log('Boot: Loaded ' + userCards.length + ' cards from localStorage');
-  }
-  
-  if (_origBoot) _origBoot();
-  
-  loadActiveRentals();
-  
-  window.fetchRentCountries().then(function(countries) {
-    console.log('Boot: Pre-loaded', countries.length, 'rent countries');
-  });
-  
-  var ue = (typeof getUserEmail === 'function') ? getUserEmail() : '';
-  if (ue) {
-    setTimeout(function() { syncCardsFromServer(ue); }, 1500);
-  }
-};
 
 console.log('page-extra.js loaded: Rent, Cards & Share pages registered');

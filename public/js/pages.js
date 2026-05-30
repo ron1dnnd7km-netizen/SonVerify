@@ -1,4 +1,4 @@
-// ===== FORCE BALANCE FIX - MUST BE FIRST LINE =====
+ // ===== FORCE BALANCE FIX - MUST BE FIRST LINE =====
 (function() {
   var email = null;
   var tries = 0;
@@ -476,39 +476,47 @@ window.cancelNumber = function(id) {
     .then(function(cancelData) {
       console.log('SMS-Bus cancel result:', cancelData);
       
-      // Then cancel on your backend
-      return fetch('/api/numbers/' + id, { method: 'DELETE' })
+      // FIX: Call cancel endpoint instead of DELETE - this sets status to 'cancelled' in history
+      return fetch('/api/numbers/' + id + '/cancel', { method: 'POST' })
+        .then(function(res) { return res.json(); });
+    })
+    .catch(function(err) {
+      // If SMS-Bus cancel fails, still try to cancel locally
+      console.warn('SMS-Bus cancel failed, cancelling locally:', err.message);
+      return fetch('/api/numbers/' + id + '/cancel', { method: 'POST' })
         .then(function(res) { return res.json(); });
     })
     .then(function(data) {
       if (data && data.error) {
         showToast(data.error, 'error');
+        if (btn) { btn.disabled = false; }
+        return;
+      }
+      
+      showToast('Number cancelled! Balance refunded.', 'success');
+      
+      if (data && data.balance !== undefined) {
+        window.updateBalanceDisplay(data.balance);
       } else {
-        var refundAmount = (data && data.balance !== undefined) ? '' : '';
-        showToast('Number cancelled! Balance refunded.', 'success');
-        
-        if (data && data.balance !== undefined) {
-          window.updateBalanceDisplay(data.balance);
-        } else {
-          if (typeof loadBalance === 'function') loadBalance();
-        }
-        
-        if (typeof loadNumbers === 'function') {
-          loadNumbers().then(function() {
-            if (typeof renderMainContent === 'function') renderMainContent();
-          });
-        } else {
-          window.activeNumbers = window.activeNumbers.filter(function(n) { return n.id != id; });
-          if (typeof renderMainContent === 'function') renderMainContent();
-        }
+        if (typeof loadBalance === 'function') loadBalance();
+      }
+      
+      // Remove from active numbers immediately
+      window.activeNumbers = window.activeNumbers.filter(function(n) { return n.id != id; });
+      if (typeof renderMainContent === 'function') renderMainContent();
+      
+      // Also load history so cancelled item appears there
+      if (typeof loadHistory === 'function') {
+        loadHistory().catch(function() {});
       }
     })
     .catch(function(err) {
       console.error('Cancel error:', err);
       showToast('Error cancelling: ' + err.message, 'error');
+      if (btn) { btn.disabled = false; }
     })
     .finally(function() {
-      if (btn) { btn.disabled = false; }
+      // Don't re-enable button since number is removed
     });
 };
 
@@ -1452,63 +1460,401 @@ function getDashboardServiceListHTML() {
   }).join('');
 }
   
-  function renderHistoryPage(main) {
-  var rows = '';
-  // ✅ FIX: Show loading spinner instead of empty state while fetching
-  if (!window.historyData || window.historyData.length === 0) {
-    rows = '<div style="text-align:center;padding:40px 20px;color:var(--text-muted);">' +
-      '<i class="fas fa-spinner fa-spin" style="font-size:24px;display:block;margin-bottom:12px;"></i>' +
-      '<p style="font-size:14px;">Loading history...</p></div>';
-  } else {
-    rows = historyData.map(function(h) {
-      var service = services.find(function(s) { return s.name.toLowerCase() === h.service_name.toLowerCase(); });
-      var existingIcon = service ? service.icon : '';
-      var ico = getServiceIconData(h.service_name, h.service_id, existingIcon);
-      
-      // FIX: Use getFlagFromPhone for correct Canada flag in history
-      var countryFlag = h.country_flag || getFlagFromPhone(h.phone, h.countryCode, h.country_code);
-      
-      var phoneDisplay = (h.phone.charAt(0) !== '+' ? '+' : '') + h.phone;
-      var phoneCopy = phoneDisplay;
-      
-      var statusColor, statusLabel;
-      if (h.status === 'success') {
-        statusColor = 'var(--accent)';
-        statusLabel = 'Code Received';
-      } else if (h.status === 'pending' || h.status === 'waiting') {
-        statusColor = 'var(--warning)';
-        statusLabel = 'Waiting';
-      // FIX: Handle cancelled status in history
-      } else if (h.status === 'cancelled') {
-        statusColor = 'var(--text-muted)';
-        statusLabel = 'Cancelled';
-      } else {
-        statusColor = 'var(--danger)';
-        statusLabel = 'Timeout';
+  // ===== UNIFIED HISTORY SYSTEM =====
+window.unifiedHistory = {
+  sms: [],
+  rent: [],
+  cards: [],
+  gift: [],
+  loading: false,
+  loaded: false,
+  activeTab: 'sms'
+};
+
+// Cache history to localStorage for instant loading
+function getHistoryCacheKey() {
+  var ue = (typeof getUserEmail === 'function') ? getUserEmail() : '';
+  return 'unified_history_' + (ue || 'guest');
+}
+
+function saveHistoryToCache() {
+  try {
+    var cache = {
+      sms: window.unifiedHistory.sms.slice(0, 100), // Keep last 100
+      rent: window.unifiedHistory.rent.slice(0, 50),
+      cards: window.unifiedHistory.cards.slice(0, 50),
+      gift: window.unifiedHistory.gift.slice(0, 50),
+      timestamp: Date.now()
+    };
+    localStorage.setItem(getHistoryCacheKey(), JSON.stringify(cache));
+  } catch (e) {}
+}
+
+function loadHistoryFromCache() {
+  try {
+    var raw = localStorage.getItem(getHistoryCacheKey());
+    if (raw) {
+      var parsed = JSON.parse(raw);
+      if (parsed.sms) window.unifiedHistory.sms = parsed.sms;
+      if (parsed.rent) window.unifiedHistory.rent = parsed.rent;
+      if (parsed.cards) window.unifiedHistory.cards = parsed.cards;
+      if (parsed.gift) window.unifiedHistory.gift = parsed.gift;
+      return true;
+    }
+  } catch (e) {}
+  return false;
+}
+
+// Load all history in PARALLEL (fast)
+window.loadUnifiedHistory = async function() {
+  if (window.unifiedHistory.loading) return;
+  window.unifiedHistory.loading = true;
+  
+  var email = (typeof getUserEmail === 'function') ? getUserEmail() : '';
+  if (!email) {
+    window.unifiedHistory.loading = false;
+    return;
+  }
+  
+  // ✅ Cache is already loaded in renderHistoryPage - no need to load again
+  var hadCacheData = window.unifiedHistory.sms.length > 0 || 
+                     window.unifiedHistory.rent.length > 0 || 
+                     window.unifiedHistory.cards.length > 0;
+  
+  try {
+    // Fetch ALL history types in parallel
+    var results = await Promise.allSettled([
+      fetch('/api/history/' + email, { headers: { 'Accept': 'application/json' } })
+        .then(r => r.ok ? r.json() : [])
+        .catch(() => []),
+      fetch('/api/rentals/' + email, { headers: { 'Accept': 'application/json' } })
+        .then(r => r.ok ? r.json() : [])
+        .catch(() => []),
+      fetch('/api/cards/' + email, { headers: { 'Accept': 'application/json' } })
+        .then(r => r.ok ? r.json() : [])
+        .catch(() => [])
+    ]);
+    
+    // Process SMS history
+    var smsData = results[0].status === 'fulfilled' ? results[0].value : [];
+    if (Array.isArray(smsData)) {
+      window.unifiedHistory.sms = smsData.map(function(h) {
+        return {
+          type: 'sms',
+          id: h.id,
+          phone: h.phone,
+          service_name: h.service_name || 'Unknown',
+          service_id: h.service_id,
+          service_icon: h.service_icon,
+          country_flag: h.country_flag,
+          country_code: h.countryCode || h.country_code,
+          code: h.code,
+          cost: parseFloat(h.cost) || 0,
+          status: h.status === 'success' ? 'received' : h.status === 'cancelled' ? 'cancelled' : 'expired',
+          created_at: h.created_at
+        };
+      });
+    }
+    
+    // Process Rent history
+    var rentData = results[1].status === 'fulfilled' ? results[1].value : [];
+    if (Array.isArray(rentData)) {
+      var activeRentIds = (typeof activeRentals !== 'undefined') ? activeRentals.map(function(r) { return r.id; }) : [];
+      window.unifiedHistory.rent = rentData
+        .filter(function(r) { return activeRentIds.indexOf(r.id) === -1; })
+        .map(function(r) {
+          return {
+            type: 'rent',
+            id: r.id,
+            phone: r.phone,
+            country_flag: r.countryFlag || '🌍',
+            country_code: r.countryCode,
+            cost: parseFloat(r.cost) || 0,
+            status: r.status || 'cancelled',
+            created_at: r.createdAt || r.created_at,
+            expires_at: r.expiresAt,
+            plan_name: r.planName
+          };
+        });
+    }
+    
+    // Process Cards history
+    var cardData = results[2].status === 'fulfilled' ? results[2].value : [];
+    if (Array.isArray(cardData)) {
+      var cards = cardData.cards || cardData;
+      if (Array.isArray(cards)) {
+        window.unifiedHistory.cards = cards.map(function(c) {
+          return {
+            type: 'card',
+            id: c.id,
+            cardType: c.cardType,
+            fullNumber: c.fullNumber,
+            cardHolderName: c.cardHolderName,
+            balance: parseFloat(c.balance) || 0,
+            status: c.frozen ? 'frozen' : 'active',
+            created_at: c.createdAt || c.created_at
+          };
+        });
+      }
+    }
+    
+    window.unifiedHistory.gift = [];
+    window.unifiedHistory.loaded = true;
+    saveHistoryToCache();
+    
+    // ✅ FIX: Only re-render if on history page AND data changed
+    if (window.currentPage === 'history') {
+      var container = document.getElementById('historyTabContent');
+      if (container) {
+        renderHistoryTabContent(container);
       }
       
-      var codeDisplay = h.code ? '<div style="font-family:JetBrains Mono,monospace;font-size:14px;font-weight:800;color:var(--accent);letter-spacing:2px;margin:0 6px;">' + h.code + '</div>' : '';
+      // Update tab counts if they changed
+      var newSmsCount = window.unifiedHistory.sms.length;
+      var newRentCount = window.unifiedHistory.rent.length;
+      var newCardsCount = window.unifiedHistory.cards.length;
       
-      return '<div style="background:var(--bg-primary);border:1px solid var(--border);border-radius:12px;padding:12px;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;">' +
-        '<div style="display:flex;align-items:center;gap:8px;flex:1;min-width:150px;">' +
-          '<div style="font-size:18px;flex-shrink:0;">' + countryFlag + '</div>' +
-          '<div style="width:28px;height:28px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;background:' + ico.bg + ';color:' + ico.color + ';">' +
-           ico.html +
-          '</div>' +
-          '<div style="font-family:JetBrains Mono,monospace;font-size:13px;font-weight:700;word-break:break-all;">' + phoneDisplay + '</div>' +
-          '<button class="btn-sm copy" onclick="copyNumber(\'' + phoneCopy + '\')" style="padding:4px 6px;font-size:10px;flex-shrink:0;"><i class="fas fa-copy"></i></button>' +
-        '</div>' +
-        codeDisplay +
-        '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">' +
-          '<span style="font-size:10px;padding:3px 8px;border-radius:6px;font-weight:600;background:' + statusColor + '22;color:' + statusColor + ';white-space:nowrap;">' + statusLabel + '</span>' +
-          '<span style="font-size:11px;font-weight:700;color:var(--accent);min-width:30px;text-align:right;">$' + h.cost.toFixed(2) + '</span>' +
-        '</div>' +
-      '</div>';
-    }).join('');
+      if (newSmsCount !== hadCacheData || newRentCount !== hadCacheData || newCardsCount !== hadCacheData) {
+        // Counts changed, re-render entire page to update tabs
+        renderHistoryPage(document.getElementById('mainContent') || document.getElementById('appContent'));
+      }
+    }
+    
+  } catch (err) {
+    console.warn('Failed to load unified history:', err.message);
+  } finally {
+    window.unifiedHistory.loading = false;
   }
-  main.innerHTML = '<div class="page-header"><h1 class="page-title">SMS History</h1>' +
-    '<div class="page-actions"><button class="btn btn-secondary" onclick="showToast(\'Export coming soon\',\'info\')"><i class="fas fa-download"></i> Export</button></div></div>' +
-    '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:18px;padding:24px;box-shadow:var(--shadow-sm);"><div style="display:flex;flex-direction:column;gap:12px;">' + rows + '</div></div>';
+};
+
+window.switchHistoryTab = function(tab) {
+  window.unifiedHistory.activeTab = tab;
+  var container = document.getElementById('historyTabContent');
+  if (container) {
+    renderHistoryTabContent(container);
+  }
+  // Update tab button styles
+  document.querySelectorAll('.history-tab-btn').forEach(function(btn) {
+    if (btn.dataset.tab === tab) {
+      btn.style.background = 'var(--accent)';
+      btn.style.color = '#fff';
+    } else {
+      btn.style.background = 'var(--bg-primary)';
+      btn.style.color = 'var(--text-secondary)';
+    }
+  });
+};
+
+function renderHistoryTabContent(container) {
+  var tab = window.unifiedHistory.activeTab;
+  var items = [];
+  var emptyIcon = 'fas fa-inbox';
+  var emptyText = 'No history yet';
+  
+  if (tab === 'sms') {
+    items = window.unifiedHistory.sms;
+    emptyIcon = 'fas fa-comment-dots';
+    emptyText = 'No SMS history yet';
+  } else if (tab === 'rent') {
+    items = window.unifiedHistory.rent;
+    emptyIcon = 'fas fa-phone-alt';
+    emptyText = 'No rent history yet';
+  } else if (tab === 'cards') {
+    items = window.unifiedHistory.cards;
+    emptyIcon = 'far fa-credit-card';
+    emptyText = 'No card history yet';
+  } else if (tab === 'gift') {
+    items = window.unifiedHistory.gift;
+    emptyIcon = 'fas fa-gift';
+    emptyText = 'No gift card history yet';
+  }
+  
+  if (items.length === 0) {
+    container.innerHTML = '<div style="text-align:center;padding:48px 20px;">' +
+      '<i class="' + emptyIcon + '" style="font-size:40px;color:var(--text-muted);opacity:0.2;display:block;margin-bottom:14px;"></i>' +
+      '<p style="font-size:14px;color:var(--text-muted);margin:0;">' + emptyText + '</p></div>';
+    return;
+  }
+  
+  var html = items.map(function(item) {
+    if (tab === 'sms') return renderSmsHistoryItem(item);
+    if (tab === 'rent') return renderRentHistoryItem(item);
+    if (tab === 'cards') return renderCardHistoryItem(item);
+    if (tab === 'gift') return renderGiftHistoryItem(item);
+    return '';
+  }).join('');
+  
+  container.innerHTML = '<div style="display:flex;flex-direction:column;gap:10px;">' + html + '</div>';
+}
+
+function renderSmsHistoryItem(h) {
+  var service = (typeof services !== 'undefined') ? services.find(function(s) { return s.name.toLowerCase() === (h.service_name || '').toLowerCase(); }) : null;
+  var ico = getServiceIconData(h.service_name, h.service_id, service ? service.icon : h.service_icon);
+  var countryFlag = h.country_flag || getFlagFromPhone(h.phone, h.country_code);
+  var phoneDisplay = (h.phone || '').charAt(0) !== '+' ? '+' + h.phone : h.phone;
+  
+  var statusColor, statusLabel;
+  if (h.status === 'received' || h.status === 'success') {
+    statusColor = 'var(--accent)';
+    statusLabel = 'Code Received';
+  } else if (h.status === 'cancelled') {
+    statusColor = 'var(--text-muted)';
+    statusLabel = 'Cancelled';
+  } else {
+    statusColor = 'var(--danger)';
+    statusLabel = 'Timeout';
+  }
+  
+  var codeDisplay = h.code ? '<div style="font-family:JetBrains Mono,monospace;font-size:14px;font-weight:800;color:var(--accent);letter-spacing:2px;margin:0 8px;">' + h.code + '</div>' : '';
+  var dateStr = h.created_at ? new Date(h.created_at).toLocaleDateString() + ' ' + new Date(h.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+  
+  return '<div style="background:var(--bg-primary);border:1px solid var(--border);border-radius:12px;padding:12px;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;">' +
+    '<div style="display:flex;align-items:center;gap:8px;flex:1;min-width:150px;">' +
+      '<div style="font-size:18px;flex-shrink:0;">' + countryFlag + '</div>' +
+      '<div style="width:28px;height:28px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;background:' + ico.bg + ';color:' + ico.color + ';">' + ico.html + '</div>' +
+      '<div><div style="font-size:11px;color:var(--text-muted);">' + (h.service_name || 'Unknown') + '</div>' +
+      '<div style="font-family:JetBrains Mono,monospace;font-size:13px;font-weight:700;">' + phoneDisplay + '</div></div>' +
+    '</div>' +
+    codeDisplay +
+    '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">' +
+      '<span style="font-size:10px;padding:3px 8px;border-radius:6px;font-weight:600;background:' + statusColor + '22;color:' + statusColor + ';white-space:nowrap;">' + statusLabel + '</span>' +
+      '<span style="font-size:11px;font-weight:700;color:var(--accent);">$' + (h.cost || 0).toFixed(2) + '</span>' +
+    '</div>' +
+    (dateStr ? '<div style="width:100%;font-size:10px;color:var(--text-muted);margin-top:4px;">' + dateStr + '</div>' : '') +
+  '</div>';
+}
+
+function renderRentHistoryItem(r) {
+  var phoneDisplay = (r.phone || '').charAt(0) !== '+' ? '+' + r.phone : r.phone;
+  var dateStr = r.created_at ? new Date(r.created_at).toLocaleDateString() : '';
+  var expiresStr = r.expires_at ? new Date(r.expires_at).toLocaleDateString() : '';
+  
+  var statusColor, statusLabel;
+  if (r.status === 'cancelled') {
+    statusColor = 'var(--text-muted)';
+    statusLabel = 'Cancelled';
+  } else if (r.status === 'expired') {
+    statusColor = 'var(--danger)';
+    statusLabel = 'Expired';
+  } else {
+    statusColor = 'var(--accent)';
+    statusLabel = 'Completed';
+  }
+  
+  return '<div style="background:var(--bg-primary);border:1px solid var(--border);border-radius:12px;padding:14px;">' +
+    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">' +
+      '<div style="display:flex;align-items:center;gap:10px;">' +
+        '<span style="font-size:24px;">' + (r.country_flag || '🌍') + '</span>' +
+        '<div><div style="font-family:JetBrains Mono,monospace;font-size:15px;font-weight:700;">' + phoneDisplay + '</div>' +
+        '<div style="font-size:11px;color:var(--text-muted);">' + (r.plan_name || '1 Month') + '</div></div>' +
+      '</div>' +
+      '<div style="display:flex;align-items:center;gap:8px;">' +
+        '<span style="font-size:10px;padding:3px 8px;border-radius:6px;font-weight:600;background:' + statusColor + '22;color:' + statusColor + ';">' + statusLabel + '</span>' +
+        '<span style="font-size:13px;font-weight:700;color:var(--accent);">$' + (r.cost || 0).toFixed(2) + '</span>' +
+      '</div>' +
+    '</div>' +
+    '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-muted);">' +
+      '<span>Rented: ' + dateStr + '</span>' +
+      (expiresStr ? '<span>Expired: ' + expiresStr + '</span>' : '') +
+    '</div>' +
+  '</div>';
+}
+
+function renderCardHistoryItem(c) {
+  var cardType = virtualCardTypes.find(function(t) { return t.id === c.cardType; });
+  var gradient = cardType ? cardType.gradient : 'linear-gradient(135deg, #1a1a2e, #16213e)';
+  var brand = cardType ? cardType.brand : 'VISA';
+  var typeName = cardType ? cardType.name : 'Virtual Card';
+  var maskedNum = c.fullNumber ? c.fullNumber.replace(/\d(?=.{4})/g, '•') : '•••• •••• •••• ••••';
+  
+  var statusColor = c.status === 'frozen' ? 'var(--warning)' : 'var(--accent)';
+  var statusLabel = c.status === 'frozen' ? 'Frozen' : 'Active';
+  
+  return '<div style="background:var(--bg-primary);border:1px solid var(--border);border-radius:12px;padding:14px;">' +
+    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">' +
+      '<div style="display:flex;align-items:center;gap:10px;">' +
+        '<div style="width:44px;height:28px;border-radius:6px;background:' + gradient + ';display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;color:rgba(255,255,255,0.9);letter-spacing:1px;">' + brand + '</div>' +
+        '<div><div style="font-size:13px;font-weight:600;">' + typeName + '</div>' +
+        '<div style="font-family:JetBrains Mono,monospace;font-size:12px;color:var(--text-muted);">' + maskedNum + '</div></div>' +
+      '</div>' +
+      '<div style="display:flex;align-items:center;gap:8px;">' +
+        '<span style="font-size:10px;padding:3px 8px;border-radius:6px;font-weight:600;background:' + statusColor + '22;color:' + statusColor + ';">' + statusLabel + '</span>' +
+        '<span style="font-size:13px;font-weight:700;color:var(--accent);">$' + (c.balance || 0).toFixed(2) + '</span>' +
+      '</div>' +
+    '</div>' +
+    (c.created_at ? '<div style="font-size:11px;color:var(--text-muted);">Created: ' + new Date(c.created_at).toLocaleDateString() + '</div>' : '') +
+  '</div>';
+}
+
+function renderGiftHistoryItem(g) {
+  return '<div style="background:var(--bg-primary);border:1px solid var(--border);border-radius:12px;padding:14px;">' +
+    '<div style="display:flex;align-items:center;justify-content:space-between;">' +
+      '<div style="display:flex;align-items:center;gap:10px;">' +
+        '<span style="font-size:24px;">🎁</span>' +
+        '<div><div style="font-size:13px;font-weight:600;">' + (g.name || 'Gift Card') + '</div>' +
+        '<div style="font-size:11px;color:var(--text-muted);">' + (g.email || '') + '</div></div>' +
+      '</div>' +
+      '<span style="font-size:13px;font-weight:700;color:var(--accent);">$' + (g.amount || 0).toFixed(2) + '</span>' +
+    '</div>' +
+  '</div>';
+}
+
+function renderHistoryPage(main) {
+  // ✅ FIX: Load from cache IMMEDIATELY before rendering
+  if (!window.unifiedHistory.loaded) {
+    loadHistoryFromCache();
+  }
+  
+  var tab = window.unifiedHistory.activeTab;
+  var smsCount = window.unifiedHistory.sms.length;
+  var rentCount = window.unifiedHistory.rent.length;
+  var cardsCount = window.unifiedHistory.cards.length;
+  var totalCount = smsCount + rentCount + cardsCount;
+  
+  var tabBtnStyle = function(t, count, icon) {
+    var isActive = tab === t;
+    return '<button class="history-tab-btn" data-tab="' + t + '" onclick="switchHistoryTab(\'' + t + '\')" style="flex:1;padding:10px;border-radius:10px;border:none;cursor:pointer;font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;transition:all 0.2s;background:' + (isActive ? 'var(--accent)' : 'var(--bg-primary)') + ';color:' + (isActive ? '#fff' : 'var(--text-secondary)') + ';">' +
+      '<i class="' + icon + '" style="font-size:12px;"></i>' +
+      '<span>' + t.charAt(0).toUpperCase() + t.slice(1) + '</span>' +
+      (count > 0 ? '<span style="font-size:10px;padding:1px 6px;border-radius:6px;background:' + (isActive ? 'rgba(255,255,255,0.2)' : 'var(--accent-dim)') + ';color:' + (isActive ? '#fff' : 'var(--accent)') + ';">' + count + '</span>' : '') +
+    '</button>';
+  };
+  
+  // ✅ FIX: Check if we have ANY cached data to show
+  var hasCachedData = smsCount > 0 || rentCount > 0 || cardsCount > 0;
+  
+  main.innerHTML =
+    '<div class="page-header">' +
+      '<div><h1 class="page-title"><i class="fas fa-clock-rotate-left" style="color:var(--accent);margin-right:10px;"></i>History</h1>' +
+      '<p style="font-size:14px;color:var(--text-secondary);margin-top:8px;">All your transactions in one place</p></div>' +
+      '<div style="display:flex;align-items:center;gap:8px;">' +
+        '<span style="font-size:12px;padding:4px 12px;border-radius:8px;font-weight:600;background:var(--accent-dim);color:var(--accent);">' + totalCount + ' total</span>' +
+      '</div>' +
+    '</div>' +
+    
+    '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:20px;background:var(--bg-card);border:1px solid var(--border);border-radius:14px;padding:6px;">' +
+      tabBtnStyle('sms', smsCount, 'fas fa-comment-dots') +
+      tabBtnStyle('rent', rentCount, 'fas fa-phone-alt') +
+      tabBtnStyle('cards', cardsCount, 'far fa-credit-card') +
+      tabBtnStyle('gift', 0, 'fas fa-gift') +
+    '</div>' +
+    
+    '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:18px;padding:20px;box-shadow:var(--shadow-sm);">' +
+      '<div id="historyTabContent">' +
+        (hasCachedData 
+          ? ''  // ✅ EMPTY - content will be rendered immediately below
+          : '<div style="text-align:center;padding:40px 20px;"><i class="fas fa-spinner fa-spin" style="font-size:24px;color:var(--accent);display:block;margin-bottom:12px;"></i><p style="font-size:14px;color:var(--text-muted);">Loading history...</p></div>') +
+      '</div>' +
+    '</div>';
+  
+  // ✅ FIX: Render tab content IMMEDIATELY if we have cached data
+  if (hasCachedData) {
+    var container = document.getElementById('historyTabContent');
+    if (container) renderHistoryTabContent(container);
+  }
+  
+  // ✅ FIX: Load fresh data in background (no loading spinner shown)
+  window.loadUnifiedHistory();
 }
         
      

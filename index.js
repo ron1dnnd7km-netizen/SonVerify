@@ -1829,3 +1829,80 @@ server.on('clientError', function(err, socket) {
   if (err.code === 'HPE_INVALID_CONSTANT') return socket.destroy();
   socket.end('HTTP/1.1 400 Bad Request\r\n\r\n');
 });
+
+// Cancel number - set status to 'cancelled' and move to history
+app.post('/api/numbers/:id/cancel', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const email = req.body.email || req.query.email;
+    
+    // Find the number
+    const number = await db.get('SELECT * FROM active_numbers WHERE id = ?', [id]);
+    if (!number) {
+      return res.status(404).json({ error: 'Number not found' });
+    }
+    
+    // Calculate refund (full refund if still waiting, partial if received)
+    let refundAmount = number.cost;
+    if (number.status === 'received') {
+      refundAmount = 0; // No refund if code already received
+    } else if (number.status === 'expired') {
+      refundAmount = number.cost; // Full refund on expiry
+    }
+    
+    // Update status to cancelled
+    await db.run('UPDATE active_numbers SET status = ? WHERE id = ?', ['cancelled', id]);
+    
+    // Move to history table (create if not exists)
+    await db.run(`
+      INSERT INTO number_history (id, email, phone, service_name, service_id, service_icon, 
+        country_code, country_flag, country_name, code, sms_text, cost, status, created_at)
+      SELECT id, email, phone, service_name, service_id, service_icon,
+        country_code, country_flag, country_name, code, sms_text, cost, status, created_at
+      FROM active_numbers WHERE id = ?
+    `, [id]);
+    
+    // Delete from active numbers
+    await db.run('DELETE FROM active_numbers WHERE id = ?', [id]);
+    
+    // Refund balance
+    if (refundAmount > 0 && email) {
+      await db.run('UPDATE users SET balance = balance + ? WHERE email = ?', [refundAmount, email]);
+      
+      // Get updated balance
+      const user = await db.get('SELECT balance FROM users WHERE email = ?', [email]);
+      return res.json({ 
+        success: true, 
+        balance: user ? user.balance : undefined,
+        refunded: refundAmount 
+      });
+    }
+    
+    res.json({ success: true, refunded: 0 });
+    
+  } catch (err) {
+    console.error('Cancel error:', err);
+    res.status(500).json({ error: 'Failed to cancel number' });
+  }
+});
+
+// Unified history endpoint - returns ALL history types
+app.get('/api/history/:email', async (req, res) => {
+  try {
+    const { email } = req.params;
+    
+    // Get SMS/activation history
+    const smsHistory = await db.all(`
+      SELECT id, phone, service_name, service_id, service_icon, 
+             country_flag, country_code, code, cost, status, created_at
+      FROM number_history 
+      WHERE email = ? 
+      ORDER BY created_at DESC LIMIT 100
+    `, [email]);
+    
+    res.json(smsHistory);
+  } catch (err) {
+    console.error('History error:', err);
+    res.status(500).json({ error: 'Failed to load history' });
+  }
+});

@@ -171,7 +171,7 @@ function initNavigation() { document.querySelectorAll('.nav-link[data-page]').fo
 window.addEventListener('hashchange', function() { var page = getPageFromHash(); if (page !== window.currentPage) goToPage(page); });
 
 function preLoadPageData(page) {
-  if (page === 'history') loadHistory();
+  if (page === 'history') return loadUnifiedHistory();
   else if (page === 'numbers') loadNumbers();
   else if (page === 'deposit') { loadBalance(); if (typeof loadDepositHistory === 'function') loadDepositHistory(); }
   else loadBalance();
