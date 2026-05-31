@@ -1402,19 +1402,27 @@ app.post('/api/v2/rent/get', async function(req, res) {
 app.post('/api/v2/rent/sms', async function(req, res) {
   try {
     var rentalId = req.body.rentalId;
-    var parts = rentalId.split(':');
-    var area_code = parts[0];
-    var mobile_number = parts[1];
-    
-    if (!area_code || !mobile_number) {
-      return res.status(400).json({ error: 'Invalid rental ID format' });
-    }
     
     var baseUrl = await findWorkingRentUrl();
     if (!baseUrl) {
       return res.status(502).json({ error: 'SMS-Bus rental API unreachable' });
     }
     
+    // Parse rentalId format "CA:+3434700105"
+    var parts = rentalId.split(':');
+    var area_code = parts[0];
+    var mobile_number = parts[1] || '';
+    
+    // FIX: Remove + from mobile_number!
+    if (mobile_number.charAt(0) === '+') {
+      mobile_number = mobile_number.substring(1);
+    }
+    
+    if (!area_code || !mobile_number) {
+      return res.status(400).json({ error: 'Invalid rental ID format' });
+    }
+    
+    // Fetch both latest and list
     var [latestRes, listRes] = await Promise.all([
       fetch(baseUrl + '/v1/rent/get/sms?token=' + SMS_BUS_TOKEN + '&area_code=' + area_code + '&mobile_number=' + mobile_number),
       fetch(baseUrl + '/v1/rent/list/sms?token=' + SMS_BUS_TOKEN + '&area_code=' + area_code + '&mobile_number=' + mobile_number + '&page_size=50')
@@ -1424,9 +1432,11 @@ app.post('/api/v2/rent/sms', async function(req, res) {
     var listData = await listRes.json();
     
     var result;
+    
+    // Prefer list if it has SMS
     if (listData.code === 200 && listData.data && listData.data.list && listData.data.list.length > 0) {
       result = { list: listData.data.list };
-    } else if (latestData.code === 200 && latestData.data) {
+    } else if (latestData.code === 200 && latestData.data && latestData.data.content) {
       result = latestData.data;
     } else {
       result = { content: null };
@@ -1435,34 +1445,6 @@ app.post('/api/v2/rent/sms', async function(req, res) {
     res.json({ code: 200, data: result });
   } catch (err) {
     console.error('Rent SMS error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// POST /api/v2/rent/cancel
-app.post('/api/v2/rent/cancel', async function(req, res) {
-  try {
-    var orderId = req.body.orderId;
-    
-    var baseUrl = await findWorkingRentUrl();
-    if (!baseUrl) {
-      return res.status(502).json({ error: 'SMS-Bus rental API unreachable' });
-    }
-    
-    var url = baseUrl + '/v1/rent/cancel/order' +
-      '?token=' + SMS_BUS_TOKEN +
-      '&order_id=' + orderId;
-    
-    var response = await fetch(url);
-    var data = await response.json();
-    
-    if (data.code !== 200) {
-      return res.status(502).json({ error: data.message || 'Failed to cancel' });
-    }
-    
-    res.json({ code: 200, data: data.data });
-  } catch (err) {
-    console.error('Rent cancel error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
