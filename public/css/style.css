@@ -1,4 +1,4 @@
-/* ===== FORCE: Hide all mobile elements on desktop ===== */
+ /* ===== FORCE: Hide all mobile elements on desktop ===== */
 @media (min-width: 769px) {
   .mobile-dropdown-content { display: none !important; }
   .nav-center-logo { display: none !important; }

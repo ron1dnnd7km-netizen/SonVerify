@@ -487,9 +487,9 @@ window.getRentCountryOptions = function() {
     .hide-mobile{display:inline}
     @media(max-width:768px){.hide-mobile{display:none!important}.card-flip-inner{height:160px}#detailSmsContainer{max-height:260px!important}#renewOptionsWrap{grid-template-columns:repeat(3,1fr)!important}}
     @media(max-width:400px){#detailSmsContainer{max-height:200px!important}#renewOptionsWrap{grid-template-columns:repeat(2,1fr)!important}}
-    @media(min-width:1024px){.detail-three-col-grid{grid-template-columns:1fr 1fr 1.5fr!important}.detail-sms-card{order:3!important}}
-    @media(max-width:1023px) and (min-width:769px){.detail-three-col-grid{grid-template-columns:1fr 1fr!important}.detail-sms-card{grid-column:1/-1!important;order:4!important}}
-    @media(max-width:768px){.detail-three-col-grid{grid-template-columns:1fr!important;gap:12px!important}.detail-sms-card{order:4!important}}
+    @media(min-width:1024px){.detail-two-col-grid{grid-template-columns:1fr 1.5fr!important}.detail-sms-card{order:2!important}}
+    @media(max-width:1023px) and (min-width:769px){.detail-two-col-grid{grid-template-columns:1fr 1fr!important}.detail-sms-card{grid-column:1/-1!important;order:3!important}}
+    @media(max-width:768px){.detail-two-col-grid{grid-template-columns:1fr!important;gap:12px!important}.detail-sms-card{order:3!important}}
     #renewOptionsWrap{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
     #detailSmsContainer::-webkit-scrollbar{width:6px}
     #detailSmsContainer::-webkit-scrollbar-track{background:transparent}
@@ -537,11 +537,26 @@ window.loadRentPageData = async function(main) {
         else return;
       }
       if (rentals.length > 0) {
-        activeRentals = rentals;
-        activeRentals.sort(function(a, b) { return new Date(b.createdAt || 0) - new Date(a.createdAt || 0); }
-        );
-        try { localStorage.setItem('active_rentals_' + ue, JSON.stringify(activeRentals)); } catch(e) {}
-      }
+    // Preserve SMS from existing rentals before overwriting
+    var existingSms = {};
+    activeRentals.forEach(function(r) {
+    if (r.sms && r.sms.length > 0) {
+      existingSms[r.id] = r.sms;
+    }
+  });
+  
+  activeRentals = rentals;
+  activeRentals.sort(function(a, b) { return new Date(b.createdAt || 0) - new Date(a.createdAt || 0); });
+  
+  // Restore SMS data
+  activeRentals.forEach(function(r) {
+    if (existingSms[r.id]) {
+      r.sms = existingSms[r.id];
+    }
+  });
+  
+  try { localStorage.setItem('active_rentals_' + ue, JSON.stringify(activeRentals)); } catch(e) {}
+}
     })
     .catch(function() {});
   }
@@ -568,18 +583,37 @@ function renderRentPageContent(main, rentCountryOptions) {
       var dl = Math.floor(hl / 24);
       var td = dl > 0 ? dl + 'd ' + (hl % 24) + 'h' : (hl % 24) + 'h';
       var smsCount = (rental.sms && rental.sms.length) ? rental.sms.length : 0;
+      var cost = typeof rental.cost === 'number' ? rental.cost : 0;
+      var planName = rental.planName || '1 Month';
+      var createdAt = rental.createdAt ? new Date(rental.createdAt) : new Date();
+      var status = rental.status || 'active';
+      var isActive = status === 'active';
+      var statusColor = isActive ? '#0d9b7a' : '#d93025';
+      var statusText = isActive ? 'Active' : 'Expired';
+      
+      var orderInfoHTML = '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;margin-top:10px;background:var(--bg-primary);border:1px solid var(--border);border-radius:8px;flex-wrap:wrap;gap:6px;">' +
+        '<div style="display:flex;align-items:center;gap:8px;">' +
+          '<span style="font-size:11px;font-weight:700;color:' + statusColor + ';background:rgba(' + (isActive ? '13,155,122' : '217,48,37') + ',.1);padding:2px 8px;border-radius:6px;">' + statusText.toUpperCase() + '</span>' +
+          '<span style="font-size:11px;color:var(--text-muted);">' + planName + '</span>' +
+        '</div>' +
+        '<div style="display:flex;align-items:center;gap:8px;">' +
+          '<span style="font-size:13px;font-weight:700;color:var(--accent);">$' + cost.toFixed(2) + '</span>' +
+          (isActive ? '<span style="font-size:11px;color:var(--text-muted);">•</span><span style="font-size:11px;color:var(--text-muted);">' + td + ' left</span>' : '<span style="font-size:11px;color:var(--danger);">Expired: ' + ed.toLocaleDateString() + '</span>') +
+        '</div>' +
+      '</div>';
+      
       var sl = smsCount > 0
-        ? '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;margin-top:10px;background:var(--bg-primary);border:1px solid var(--border);border-radius:8px;"><div style="display:flex;align-items:center;gap:8px;"><i class="fas fa-envelope" style="color:var(--accent);font-size:13px;"></i><span style="font-size:12px;color:var(--text-secondary);font-weight:500;">' + smsCount + ' message' + (smsCount > 1 ? 's' : '') + '</span></div><i class="fas fa-chevron-right" style="font-size:10px;color:var(--accent);"></i></div>'
-        : '<div style="display:flex;align-items:center;gap:6px;padding:10px 12px;margin-top:10px;color:var(--text-muted);font-size:12px;"><i class="far fa-comment-dots" style="opacity:.4;"></i> No messages yet</div>';
+        ? '<div style="display:flex;align-items:center;gap:6px;padding:8px 12px;margin-top:6px;background:var(--bg-primary);border:1px solid var(--border);border-radius:8px;"><i class="fas fa-envelope" style="color:var(--accent);font-size:12px;"></i><span style="font-size:11px;color:var(--text-secondary);font-weight:500;">' + smsCount + ' message' + (smsCount > 1 ? 's' : '') + '</span><i class="fas fa-chevron-right" style="font-size:10px;color:var(--accent);margin-left:auto;"></i></div>'
+        : '<div style="display:flex;align-items:center;gap:6px;padding:8px 12px;margin-top:6px;color:var(--text-muted);font-size:11px;"><i class="far fa-comment-dots" style="opacity:.4;"></i> No messages yet</div>';
       
       return '<div class="rental-item" onclick="showRentalDetails(\'' + rental.id + '\')">' +
         '<div style="display:flex;align-items:center;gap:14px;padding:14px 16px;">' +
           '<div style="width:48px;height:48px;border-radius:14px;background:var(--accent-dim);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:24px;">' + cf + '</div>' +
           '<div style="flex:1;min-width:0;">' +
             '<div style="font-family:\'Courier New\',monospace;font-size:16px;font-weight:700;color:var(--text-primary);letter-spacing:1px;">' + pd + '</div>' +
-            '<div style="display:flex;align-items:center;gap:12px;margin-top:4px;">' +
-              '<div style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--text-muted);"><i class="fas fa-clock" style="font-size:10px;"></i>' + td + ' remaining</div>' +
-              (smsCount > 0 ? '<div style="width:4px;height:4px;border-radius:50%;background:var(--accent);"></div><div style="font-size:12px;color:var(--accent);font-weight:600;">' + smsCount + ' SMS</div>' : '') +
+            '<div style="display:flex;align-items:center;gap:8px;margin-top:4px;flex-wrap:wrap;">' +
+              '<div style="font-size:11px;color:var(--text-muted);">Rented: ' + createdAt.toLocaleDateString() + '</div>' +
+              (smsCount > 0 ? '<div style="width:4px;height:4px;border-radius:50%;background:var(--accent);"></div><div style="font-size:11px;color:var(--accent);font-weight:600;">' + smsCount + ' SMS</div>' : '') +
             '</div>' +
           '</div>' +
         '</div>' + sl + '</div>';
@@ -611,7 +645,7 @@ function renderRentPageContent(main, rentCountryOptions) {
       '<div id="rentNotAvailable" style="display:none;flex-direction:column;align-items:center;gap:8px;padding:18px;background:rgba(217,48,37,.05);border:1px solid rgba(217,48,37,.12);border-radius:12px;margin-bottom:12px;text-align:center;"><i class="fas fa-map-marker-alt" style="font-size:22px;color:var(--danger);opacity:.7;"></i><span style="font-size:13px;color:var(--danger);font-weight:500;">Not available for this country.</span></div>' +
       '<div id="rentFallbackNotice" style="display:none;align-items:center;gap:8px;padding:12px;background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.15);border-radius:10px;margin-bottom:12px;"><i class="fas fa-info-circle" style="color:#f59e0b;font-size:14px;flex-shrink:0;"></i><span style="font-size:12px;color:var(--text-secondary);">Using estimated pricing.</span></div>' +
       '<div style="display:flex;flex-direction:column;gap:12px;padding:16px;background:var(--bg-primary);border-radius:12px;border:1px solid var(--border);">' +
-        '<div style="display:flex;align-items:center;gap:8px;"><span id="rentMonthsLabel" style="font-size:13px;font-weight:600;color:var(--text-secondary);background:var(--accent-dim);padding:4px 10px;border-radius:8px;">1 Month</span><span style="font-size:13px;color:var(--text-muted);">Total:</span><span id="rentTotalPrice" style="font-size:18px;font-weight:800;color:var(--accent);">$--</span></div>' +
+        '<div style="display:flex;align-items:center;gap:8px;"><span id="rentMonthsLabel" style="font-size:13px;font-weight:600;color:var(--text-secondary);background:var(--accent-dim);padding:4px 10px;border-radius:8px;">1 Month</span><span style="font-size:13px;color:var(--text-muted);">Total:</span><span id="rentTotalPrice" style="font-size:15px;font-weight:500;color:var(--accent);">$--</span></div>' +
         '<button id="rentNowBtn" disabled style="width:100%;padding:14px;font-size:15px;border-radius:12px;display:flex;align-items:center;justify-content:center;gap:8px;background:var(--bg-card);color:var(--text-muted);border:1px solid var(--border);cursor:not-allowed;" onclick="executeRentNumber()"><i class="fas fa-shopping-cart"></i> Rent Now</button>' +
         '<div style="display:flex;align-items:flex-start;gap:8px;padding:12px;background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.15);border-radius:10px;"><i class="fas fa-info-circle" style="color:#f59e0b;font-size:13px;flex-shrink:0;margin-top:2px;"></i><div style="font-size:12px;color:var(--text-secondary);line-height:1.5;">Free cancellation within 20 minutes if no SMS received.</div></div>' +
       '</div>' +
@@ -702,7 +736,7 @@ window.refreshActiveRentals = function() {
 };
 
 // =======================================================================
-// ===== RENTAL DETAILS PAGE (3-COLUMN DESKTOP, STACKED MOBILE) =====
+// ===== RENTAL DETAILS PAGE (2-COLUMN DESKTOP, STACKED MOBILE) =====
 // =======================================================================
 var currentRentalDetailId = null;
 var smsPollingInterval = null;
@@ -719,6 +753,30 @@ window.showRentalDetails = function(rentalId) {
 
   var main = document.getElementById('appContent') || document.getElementById('mainContent');
   if (!main) return;
+
+  // Render immediately without loading spinner
+  renderRentalDetailsUI(main, rentalId);
+  
+  if (canCancelCheck(rentalId)) startCancelCountdown(rentalId, rental.createdAt);
+  
+  // Fetch SMS in background after rendering
+  fetchSmsForRental(rentalId);
+  smsPollingInterval = setInterval(function() { if (currentRentalDetailId === rentalId) fetchSmsForRental(rentalId); }, 20000);
+};
+
+window.canCancelCheck = function(rentalId) {
+  var rental = activeRentals.find(function(r) { return r.id === rentalId; });
+  if (!rental) return false;
+  var smsList = rental.sms || [];
+  var hasSms = smsList.length > 0;
+  var createdTime = new Date(rental.createdAt).getTime();
+  var canCancelByTime = (Date.now() - createdTime) < (20 * 60 * 1000);
+  return !hasSms && canCancelByTime;
+};
+
+function renderRentalDetailsUI(main, rentalId) {
+  var rental = activeRentals.find(function(r) { return r.id === rentalId; });
+  if (!rental) return;
 
   var phone = rental.phone || '';
   var displayPhone = phone.charAt(0) !== '+' ? '+' + phone : phone;
@@ -763,8 +821,6 @@ window.showRentalDetails = function(rentalId) {
     cancelSectionHtml = '<div id="cancelSection" style="display:flex;flex-direction:column;align-items:center;padding:16px 0;"><button onclick="cancelRentalFromDetail(\'' + rentalId + '\')" class="tap-target" style="padding:12px 32px;background:rgba(217,48,37,.08);border:1px solid rgba(217,48,37,.2);border-radius:12px;color:var(--danger);font-size:14px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:8px;"><i class="fas fa-times-circle"></i> Cancel Rental</button><div id="cancelTimer" style="display:flex;align-items:center;gap:6px;margin-top:10px;padding:8px 14px;background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.12);border-radius:8px;"><i class="fas fa-clock" style="color:#f59e0b;font-size:11px;"></i><span style="font-size:11px;color:var(--text-secondary);">Cancel window: <strong id="cancelCountdown" style="color:#f59e0b;">' + timerText + '</strong></span></div><div style="display:flex;align-items:flex-start;gap:8px;padding:10px 14px;background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.12);border-radius:8px;margin-top:8px;max-width:400px;"><i class="fas fa-info-circle" style="color:#f59e0b;font-size:12px;flex-shrink:0;margin-top:2px;"></i><span style="font-size:11px;color:var(--text-secondary);line-height:1.4;">Free cancellation if no SMS received within 20 minutes.</span></div></div>';
   } else if (hasSms) {
     cancelSectionHtml = '<div id="cancelSection" style="display:flex;flex-direction:column;align-items:center;padding:16px 0;"><div style="padding:12px 24px;background:var(--bg-primary);border:1px solid var(--border);border-radius:10px;display:inline-flex;align-items:center;gap:8px;opacity:.5;"><i class="fas fa-lock" style="color:var(--text-muted);"></i><span style="font-size:13px;font-weight:600;color:var(--text-muted);">Cancellation Locked</span></div><div style="display:flex;align-items:flex-start;gap:8px;padding:10px 14px;background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.12);border-radius:8px;margin-top:8px;max-width:400px;"><i class="fas fa-shield-alt" style="color:#f59e0b;font-size:12px;flex-shrink:0;margin-top:2px;"></i><span style="font-size:11px;color:var(--text-secondary);">Locked because SMS was received.</span></div></div>';
-  } else {
-    cancelSectionHtml = '<div id="cancelSection" style="display:flex;flex-direction:column;align-items:center;padding:16px 0;"><div style="padding:12px 24px;background:var(--bg-primary);border:1px solid var(--border);border-radius:10px;display:inline-flex;align-items:center;gap:8px;opacity:.5;"><i class="fas fa-hourglass-end" style="color:var(--text-muted);"></i><span style="font-size:13px;font-weight:600;color:var(--text-muted);">Cancel Window Expired</span></div></div>';
   }
 
   var renewOptions = [1, 2, 3, 5, 12].map(function(m) {
@@ -780,7 +836,7 @@ window.showRentalDetails = function(rentalId) {
         '<button onclick="manualRefreshSms(\'' + rentalId + '\')" class="tap-target" style="padding:8px 14px;background:var(--bg-card);border:1px solid var(--border);border-radius:10px;color:var(--text-secondary);font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px;"><i class="fas fa-sync-alt" style="font-size:10px;"></i> <span class="hide-mobile">Refresh</span></button>' +
         '<button onclick="copyRentalPhone(\'' + displayPhone + '\')" class="tap-target" style="padding:8px 14px;background:var(--bg-primary);border:1px solid var(--border);border-radius:10px;color:var(--text-secondary);font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px;"><i class="fas fa-copy"></i> <span class="hide-mobile">Copy</span></button>' +
       '</div>' +
-      '<div class="detail-three-col-grid" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;">' +
+      '<div class="detail-two-col-grid" style="display:grid;grid-template-columns:1fr 1.5fr;gap:16px;">' +
         '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:18px;overflow:hidden;">' +
           '<div style="padding:20px 16px;text-align:center;border-bottom:1px solid var(--border);">' +
             '<span style="font-size:40px;display:block;margin-bottom:10px;">' + flag + '</span>' +
@@ -793,22 +849,12 @@ window.showRentalDetails = function(rentalId) {
               '<div style="padding:10px;background:var(--bg-primary);border-radius:10px;border:1px solid var(--border);"><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px;">Activated</div><div style="font-size:13px;font-weight:700;color:var(--text-primary);">' + createdAt.toLocaleDateString() + '</div><div style="font-size:11px;color:var(--text-muted);">' + createdAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + '</div></div>' +
               '<div style="padding:10px;background:var(--bg-primary);border-radius:10px;border:1px solid var(--border);"><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px;">Expires</div><div style="font-size:13px;font-weight:700;color:var(--text-primary);">' + expiresAt.toLocaleDateString() + '</div><div style="font-size:11px;color:var(--danger);font-weight:700;">' + timeLeftStr + ' left</div></div>' +
             '</div>' +
-          '</div>' +
-        '</div>' +
-        '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:18px;overflow:hidden;display:flex;flex-direction:column;">' +
-          '<div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;"><i class="fas fa-receipt" style="color:var(--accent);font-size:12px;"></i><span style="font-size:13px;font-weight:700;color:var(--text-primary);">Order History</span></div>' +
-          '<div style="padding:14px 16px;flex:1;display:flex;flex-direction:column;justify-content:center;">' +
-            '<div style="padding:12px;background:var(--bg-primary);border:1px solid var(--border);border-radius:10px;">' +
-              '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><span style="font-size:11px;color:var(--text-muted);">Order ID</span><span style="font-size:11px;font-weight:700;color:var(--text-primary);font-family:\'Courier New\',monospace;max-width:60%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + orderId + '">' + orderId + '</span></div>' +
-              '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><span style="font-size:11px;color:var(--text-muted);">Status</span><span style="font-size:10px;font-weight:700;color:#0d9b7a;background:rgba(13,155,122,.1);padding:2px 8px;border-radius:6px;">COMPLETED</span></div>' +
-              '<div style="height:1px;background:var(--border);margin:8px 0;"></div>' +
-              '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><span style="font-size:11px;color:var(--text-muted);">Amount</span><span style="font-size:18px;font-weight:800;color:var(--accent);">$' + cost.toFixed(2) + '</span></div>' +
-              '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><span style="font-size:11px;color:var(--text-muted);">Duration</span><span style="font-size:13px;font-weight:600;color:var(--text-primary);">' + planName + '</span></div>' +
-              '<div style="display:flex;justify-content:space-between;align-items:center;"><span style="font-size:11px;color:var(--text-muted);">Date</span><span style="font-size:13px;color:var(--text-secondary);">' + createdAt.toLocaleDateString() + '</span></div>' +
+            '<div style="margin-top:10px;padding:12px;background:var(--bg-primary);border:1px solid var(--border);border-radius:10px;">' +
+              '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><span style="font-size:11px;color:var(--text-muted);">Order ID</span><span style="font-size:11px;font-weight:700;color:var(--text-primary);font-family:\'Courier New\',monospace;max-width:60%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + orderId + '">' + orderId + '</span></div>' +
             '</div>' +
           '</div>' +
         '</div>' +
-        '<div class="detail-sms-card" style="background:var(--bg-card);border:1px solid var(--border);border-radius:18px;overflow:hidden;display:flex;flex-direction:column;order:4;">' +
+        '<div class="detail-sms-card" style="background:var(--bg-card);border:1px solid var(--border);border-radius:18px;overflow:hidden;display:flex;flex-direction:column;order:2;">' +
           '<div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;"><div style="display:flex;align-items:center;gap:8px;"><i class="fas fa-envelope" style="color:var(--accent);font-size:12px;"></i><span style="font-size:13px;font-weight:700;color:var(--text-primary);">SMS Messages</span><span id="smsCountBadge" style="font-size:10px;padding:2px 8px;border-radius:8px;font-weight:700;background:var(--accent-dim);color:var(--accent);">' + smsList.length + '</span></div><div id="smsAutoRefreshIndicator" class="hide-mobile" style="font-size:10px;color:var(--text-muted);display:flex;align-items:center;gap:4px;"><i class="fas fa-circle" style="font-size:6px;color:#0d9b7a;animation:pulse-dot 2s infinite;"></i> Auto</div></div>' +
           '<div style="padding:12px;max-height:320px;overflow-y:auto;flex:1;" id="detailSmsContainer">' + smsHtml + '</div>' +
         '</div>' +
@@ -825,9 +871,8 @@ window.showRentalDetails = function(rentalId) {
     '</div>';
 
   if (canCancel) startCancelCountdown(rentalId, createdAt);
-  fetchSmsForRental(rentalId);
-  smsPollingInterval = setInterval(function() { if (currentRentalDetailId === rentalId) fetchSmsForRental(rentalId); }, 20000);
-};
+}
+  
 
 // ========== CANCEL COUNTDOWN ==========
 window.startCancelCountdown = function(rentalId, createdAt) {
@@ -879,7 +924,7 @@ window.fetchSmsForRental = async function(rentalId) {
         });
       }
     }
-    if (hasNew) { updateSmsDisplay(rentalId); saveRentalSmsToServer(rentalId, rental.sms); showToast }
+    if (hasNew) { updateSmsDisplay(rentalId); saveRentalSmsToServer(rentalId, rental.sms); showToast('New SMS received!', 'success'); }
   } catch (e) { console.error('SMS fetch error:', e.message); }
 };
 
@@ -1253,7 +1298,7 @@ function renderGiftCardsTab(container) {
     contentHTML =
       '<div style="background:var(--bg-primary);border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:20px;"><div style="display:flex;align-items:center;gap:12px;"><div style="width:48px;height:48px;border-radius:12px;background:var(--bg-card);display:flex;align-items:center;justify-content:center;font-size:22px;">' + (selCard ? selCard.icon : '💳') + '</div><div><div style="font-size:15px;font-weight:700;color:var(--text-primary);">' + (selCard ? selCard.name : '') + '</div><div style="font-size:12px;color:var(--text-muted);">' + ci.flag + ' • ' + ci.symbol + (selCard ? selCard.min : '') + ' – ' + ci.symbol + (selCard ? selCard.max : '') + '</div></div></div></div>' +
       '<div style="margin-bottom:14px;"><label style="display:block;font-size:12px;font-weight:600;margin-bottom:6px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.5px;">Recipient Email <span style="color:var(--danger);">*</span></label><input type="email" id="giftRecipientEmail" placeholder="recipient@email.com" value="' + sEmail.replace(/"/g, '&quot;') + '" style="width:100%;padding:12px 14px;background:var(--bg-card);border:1px solid var(--border);border-radius:10px;color:var(--text-primary);font-size:16px;outline:none;" oninput="window._giftFormEmail=this.value;updateGiftProceedBtn()"></div>' +
-      '<div style="margin-bottom:16px;"><label style="display:block;font-size:12px;font-weight:600;margin-bottom:6px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.5px;">Card Amount (' + ci.currency + ') <span style="color:var(--danger);">*</span></label><div style="position:relative;"><span style="position:absolute;left:14px;top:50%;transform:translateY(-50%);font-size:14px;font-weight:600;color:var(--text-muted);">' + ci.symbol + '</span><input type="number" id="giftCardAmount" min="' + (selCard ? selCard.min : 0) + '" max="' + (selCard ? selCard.max : 0) + '" placeholder="' + (selCard ? selCard.min : '') + '" value="' + sAmount + '" style="width:100%;padding:12px 14px 12px 30px;background:var(--bg-card);border:1px solid var(--border);border-radius:10px;color:var(--text-primary);font-size:16px;outline:none;" oninput="window._giftFormAmount=this.value;updateGiftProceedBtn()"></div></div>';
+      '<div style="margin-bottom:16px;"><label style="display:block;font-size:12px;font-weight:600;margin-bottom:6px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.5px;">Card Amount (' + ci.currency + ') <span style="color:var(--danger);">*</span></label><div style="position:relative;"><span style="position:absolute;left:14px;top:50%;transform:translateY(-50%);font-size:14px;font-weight:600;color:var(--text-muted);">' + ci.symbol + '</span><input type="number" id="giftCardAmount" min="' + (selCard ? selCard.min : 0) + '" max="' + (selCard ? selCard.max : 0) + '" placeholder="' + (selCard ? selCard.min : '') + '" value="' + sAmount + '" style="width:100%;padding:12px 14px 12px:30px;background:var(--bg-card);border:1px solid var(--border);border-radius:10px;color:var(--text-primary);font-size:16px;outline:none;" oninput="window._giftFormAmount=this.value;updateGiftProceedBtn()"></div></div>';
   }
 
   var btnHTML = '';

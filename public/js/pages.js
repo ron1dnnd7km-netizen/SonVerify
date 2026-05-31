@@ -1156,7 +1156,7 @@ function getServiceIconData(serviceName, serviceId, existingIcon) {
 function renderNumbersPage(main) {
   // FIX: Only show WAITING numbers in active section
   // Received/expired numbers enter 4-min grace period silently, then move to history
-  var waitingOnlyNumbers = activeNumbers ? activeNumbers.filter(function(n) { return n.status === 'waiting'; }) : [];
+  var waitingOnlyNumbers = activeNumbers ? activeNumbers.filter(function(n) { return n.status === 'waiting' || n.status === 'received'; }) : [];
   var totalActive = waitingOnlyNumbers.length;
 
   // FIX: Start grace period for received/expired numbers (silent 4-min countdown)
@@ -3171,3 +3171,75 @@ window.executeBuyNumber = function() {
       });
   }
 };
+
+// ===== ENSURE SMS POLLING IS RUNNING =====
+if (!window._smsPollActive) {
+  window._smsPollActive = true;
+  setInterval(function() {
+    if (typeof checkExpiredNumbers === 'function') checkExpiredNumbers();
+  }, 1000);
+}
+
+// ===== POLLING THAT IGNORES ALL OVERRIDES =====
+// Directly calls API and parses response - doesn't use smsbusCheckStatus at all
+if (!window._smsPollActive) {
+  window._smsPollActive = true;
+  setInterval(function() {
+    if (!window.activeNumbers || window.activeNumbers.length === 0) return;
+    var now = Date.now();
+    
+    window.activeNumbers.forEach(function(n) {
+      if (n.status !== 'waiting') return;
+      
+      var realId = n.provider_request_id || n.id;
+      if (!realId) return;
+      
+      if (!n._lastCheck) n._lastCheck = 0;
+      if (now - n._lastCheck < 5000) return;
+      n._lastCheck = now;
+      
+      // Direct API call - NO smsbusCheckStatus function used
+      fetch('/api/v2/status?request_id=' + realId)
+        .then(function(r) { return r.json(); })
+        .then(function(json) {
+          // Provider format: {"code":200,"data":"791625"} = CODE RECEIVED
+          // Provider format: {"code":50101} = waiting
+          // Provider format: {"code":50102} = expired
+          
+          if (json.code === 200 && json.data && String(json.data).length >= 4) {
+            var code = String(json.data).trim();
+            console.log('✅ CODE:', code, 'for', n.phone);
+            n.status = 'received';
+            n.code = code;
+            n.sms_text = 'Your verification code is ' + code;
+            
+            fetch('/api/numbers/' + n.id + '/code', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ code: code, smsText: n.sms_text })
+            }).catch(function() {});
+            
+            if (typeof startGracePeriod === 'function') startGracePeriod(n.id);
+            showToast('SMS received! Code: ' + code, 'success');
+            
+            if (window.currentPage === 'numbers' && typeof renderMainContent === 'function') {
+              renderMainContent();
+            }
+          } else if (json.code === 50102) {
+            console.log('⏰ Expired:', n.phone);
+            n.status = 'expired';
+            n.time_left = 0;
+            fetch('/api/numbers/' + n.id + '/expire', { method: 'POST' }).catch(function() {});
+            if (typeof loadBalance === 'function') loadBalance();
+            if (window.currentPage === 'numbers' && typeof renderMainContent === 'function') {
+              renderMainContent();
+            }
+          }
+          // 50101 = still waiting, do nothing
+        })
+        .catch(function() {});
+    });
+  }, 1000);
+}
+
+console.log('✅ Direct polling started (no overrides possible)');
