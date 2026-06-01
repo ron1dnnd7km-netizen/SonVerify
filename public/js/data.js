@@ -531,7 +531,7 @@ function smsbusBuyNumber(countryId, projectId, userEmail) {
       if (json.code !== 200) {
         var errorMsg = json.message || 'Unknown error';
         if (json.code === 50002) errorMsg = 'No numbers available. Try a different country.';
-        if (json.code === 50201) errorMsg = 'Provider balance too low. Contact support.';
+        if (json.code === 50201) errorMsg = 'Contact support.';
         if (json.code === 401) errorMsg = 'Invalid API key.';
         throw new Error(errorMsg);
       }
