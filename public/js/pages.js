@@ -1516,13 +1516,11 @@ window.loadUnifiedHistory = async function() {
     return;
   }
   
-  // ✅ Cache is already loaded in renderHistoryPage - no need to load again
   var hadCacheData = window.unifiedHistory.sms.length > 0 || 
                      window.unifiedHistory.rent.length > 0 || 
                      window.unifiedHistory.cards.length > 0;
   
   try {
-    // Fetch ALL history types in parallel
     var results = await Promise.allSettled([
       fetch('/api/history/' + email, { headers: { 'Accept': 'application/json' } })
         .then(r => r.ok ? r.json() : [])
@@ -1539,6 +1537,17 @@ window.loadUnifiedHistory = async function() {
     var smsData = results[0].status === 'fulfilled' ? results[0].value : [];
     if (Array.isArray(smsData)) {
       window.unifiedHistory.sms = smsData.map(function(h) {
+        var mappedStatus;
+        if (h.status === 'success' || h.status === 'received' || h.status === 'code_received') {
+          mappedStatus = 'received';
+        } else if (h.status === 'cancelled' || h.status === 'canceled') {
+          mappedStatus = 'cancelled';
+        } else if (h.status === 'expired' || h.status === 'timeout' || h.status === 'failed') {
+          mappedStatus = 'expired';
+        } else {
+          mappedStatus = h.code ? 'received' : 'expired';
+        }
+        
         return {
           type: 'sms',
           id: h.id,
@@ -1550,7 +1559,7 @@ window.loadUnifiedHistory = async function() {
           country_code: h.countryCode || h.country_code,
           code: h.code,
           cost: parseFloat(h.cost) || 0,
-          status: h.status === 'success' ? 'received' : h.status === 'cancelled' ? 'cancelled' : 'expired',
+          status: mappedStatus,
           created_at: h.created_at
         };
       });
@@ -1602,20 +1611,17 @@ window.loadUnifiedHistory = async function() {
     window.unifiedHistory.loaded = true;
     saveHistoryToCache();
     
-    // ✅ FIX: Only re-render if on history page AND data changed
     if (window.currentPage === 'history') {
       var container = document.getElementById('historyTabContent');
       if (container) {
         renderHistoryTabContent(container);
       }
       
-      // Update tab counts if they changed
       var newSmsCount = window.unifiedHistory.sms.length;
       var newRentCount = window.unifiedHistory.rent.length;
       var newCardsCount = window.unifiedHistory.cards.length;
       
       if (newSmsCount !== hadCacheData || newRentCount !== hadCacheData || newCardsCount !== hadCacheData) {
-        // Counts changed, re-render entire page to update tabs
         renderHistoryPage(document.getElementById('mainContent') || document.getElementById('appContent'));
       }
     }
