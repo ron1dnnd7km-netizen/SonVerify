@@ -2000,8 +2000,12 @@ window.loadReferralHistory = async function() {
 // ====== REFERRAL PAGE RENDER ======
 
 async function renderSettingsPage(main) {
-
-  // Render HTML skeleton FIRST (with empty placeholders)
+  // ===== FIX: Get cached referral code IMMEDIATELY =====
+  var userEmail = getUserEmail();
+  var cachedRefCode = localStorage.getItem('cachedRefCode_' + userEmail) || '';
+  var cachedLink = cachedRefCode ? (window.location.origin + '/?ref=' + cachedRefCode) : '';
+  
+  // Render HTML skeleton WITH cached data (no "Loading...")
   main.innerHTML =
     '<div class="page-header"><h1 class="page-title">Referral Program</h1></div>' +
     '<div style="max-width:900px;margin:0 auto;display:grid;gap:22px;">' +
@@ -2033,10 +2037,12 @@ async function renderSettingsPage(main) {
         '</div>' +
       '</div>' +
 
-      // 3. REFERRAL LINK
+      // 3. REFERRAL LINK - NOW SHOWS CACHED CODE IMMEDIATELY
       '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:18px;padding:24px;box-shadow:var(--shadow-sm);">' +
         '<div style="font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;font-weight:600;margin-bottom:8px;">Your REF code</div>' +
-        '<div style="font-size:14px;color:var(--text-primary);line-height:1.6;margin-bottom:16px;word-break:break-all;" id="referralLink">Loading...</div>' +
+        '<div style="font-size:14px;color:var(--text-primary);line-height:1.6;margin-bottom:16px;word-break:break-all;" id="referralLink">' + 
+          (cachedLink ? cachedLink : 'Loading...') + 
+        '</div>' +
         '<button class="btn btn-primary" style="width:100%;justify-content:center;" onclick="copyReferralLink()"><i class="fas fa-copy" style="margin-right:6px;"></i> Copy referral link</button>' +
       '</div>' +
 
@@ -2076,9 +2082,9 @@ async function renderSettingsPage(main) {
 
     '</div>';
 
-  // --- NOW FETCH REAL DATA FROM BACKEND ---
+  // --- NOW FETCH REAL DATA IN BACKGROUND (silent update, no "Loading..." flash) ---
   try {
-    var res = await fetch('/api/user/' + getUserEmail());
+    var res = await fetch('/api/user/' + userEmail);
     if (!res.ok) throw new Error('Unable to load referral data');
     var data = await res.json();
 
@@ -2093,7 +2099,7 @@ async function renderSettingsPage(main) {
         var saveRes = await fetch('/api/user/refcode', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: getUserEmail(), refCode: newCode })
+          body: JSON.stringify({ email: userEmail, refCode: newCode })
         });
         var saveData = await saveRes.json();
 
@@ -2111,7 +2117,10 @@ async function renderSettingsPage(main) {
       }
     }
 
-    // Set the referral link
+    // Cache the referral code for instant display next time
+    localStorage.setItem('cachedRefCode_' + userEmail, referralCode);
+
+    // Set the referral link (silent update, no flash)
     var url = window.location.origin + '/?ref=' + referralCode;
     var linkElFinal = document.getElementById('referralLink');
     if (linkElFinal) {
@@ -2126,7 +2135,7 @@ async function renderSettingsPage(main) {
     var countEl = document.getElementById('refCount');
     if (countEl) countEl.textContent = (data.referralCount || data.refCount || 0);
 
-        // 3. Populate history tabs from backend data
+    // 3. Populate history tabs from backend data
     var referrals = data.referrals || data.referralHistory || [];
     var histContainer = document.getElementById('refTabHistory');
     if (histContainer) {
@@ -2137,7 +2146,6 @@ async function renderSettingsPage(main) {
           var dateStr = r.date || (r.created_at ? new Date(r.created_at).toLocaleDateString() : '—');
           var email = r.email || r.referee || 'Unknown';
           
-          // FIX: Handle earned field correctly
           var earnedValue = 0;
           if (r.earned !== undefined && r.earned !== null) {
             if (typeof r.earned === 'string') {
@@ -2153,7 +2161,6 @@ async function renderSettingsPage(main) {
           var status = r.status || 'Pending';
           var statusColor = status === 'Paid' ? 'var(--accent)' : 'var(--warning)';
           
-          // ✅ Masked email so users can't see the full address
           return '<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);font-size:13px;">' +
             '<div><span style="color:var(--text-muted);">' + dateStr + '</span> — ' + maskEmail(email) + '</div>' +
             '<div style="font-weight:700;color:var(--accent);">' + earned + ' <span style="font-size:10px;color:' + statusColor + ';">(' + status + ')</span></div></div>';
@@ -2161,7 +2168,7 @@ async function renderSettingsPage(main) {
       }
     }
 
-    // Withdrawal history (make sure this is still below it)
+    // Withdrawal history
     var withdrawals = data.withdrawals || data.withdrawalHistory || [];
     var withdContainer = document.getElementById('refTabWithdrawals');
     if (withdContainer) {
@@ -2182,7 +2189,7 @@ async function renderSettingsPage(main) {
     }
 
   } catch (err) {
-    // Silent fail — page already shows default placeholder values
+    // Silent fail — page already shows cached data
     console.log('Referral data load error (non-critical):', err.message);
   }
 }
@@ -3172,18 +3179,11 @@ window.executeBuyNumber = function() {
   }
 };
 
-// ===== ENSURE SMS POLLING IS RUNNING =====
+// ===== REPLACE BOTH POLLING BLOCKS WITH THIS SINGLE VERSION =====
 if (!window._smsPollActive) {
   window._smsPollActive = true;
-  setInterval(function() {
-    if (typeof checkExpiredNumbers === 'function') checkExpiredNumbers();
-  }, 1000);
-}
-
-// ===== POLLING THAT IGNORES ALL OVERRIDES =====
-// Directly calls API and parses response - doesn't use smsbusCheckStatus at all
-if (!window._smsPollActive) {
-  window._smsPollActive = true;
+  
+  // Direct polling - bypasses any function overrides
   setInterval(function() {
     if (!window.activeNumbers || window.activeNumbers.length === 0) return;
     var now = Date.now();
@@ -3194,52 +3194,63 @@ if (!window._smsPollActive) {
       var realId = n.provider_request_id || n.id;
       if (!realId) return;
       
+      // Rate limit: check every 5 seconds per number
       if (!n._lastCheck) n._lastCheck = 0;
       if (now - n._lastCheck < 5000) return;
       n._lastCheck = now;
       
-      // Direct API call - NO smsbusCheckStatus function used
+      // Direct API call
       fetch('/api/v2/status?request_id=' + realId)
         .then(function(r) { return r.json(); })
         .then(function(json) {
           // Provider format: {"code":200,"data":"791625"} = CODE RECEIVED
-          // Provider format: {"code":50101} = waiting
-          // Provider format: {"code":50102} = expired
-          
           if (json.code === 200 && json.data && String(json.data).length >= 4) {
             var code = String(json.data).trim();
-            console.log('✅ CODE:', code, 'for', n.phone);
+            console.log('✅ CODE RECEIVED:', code, 'for', n.phone);
+            
+            // Update local state
             n.status = 'received';
             n.code = code;
             n.sms_text = 'Your verification code is ' + code;
             
+            // Save to server
             fetch('/api/numbers/' + n.id + '/code', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ code: code, smsText: n.sms_text })
             }).catch(function() {});
             
+            // Start grace period
             if (typeof startGracePeriod === 'function') startGracePeriod(n.id);
+            
+            // Show notification
             showToast('SMS received! Code: ' + code, 'success');
             
+            // Re-render if on numbers page
             if (window.currentPage === 'numbers' && typeof renderMainContent === 'function') {
               renderMainContent();
             }
-          } else if (json.code === 50102) {
-            console.log('⏰ Expired:', n.phone);
+          } 
+          else if (json.code === 50102) {
+            // Expired
+            console.log('⏰ Number expired:', n.phone);
             n.status = 'expired';
             n.time_left = 0;
+            
             fetch('/api/numbers/' + n.id + '/expire', { method: 'POST' }).catch(function() {});
             if (typeof loadBalance === 'function') loadBalance();
+            
             if (window.currentPage === 'numbers' && typeof renderMainContent === 'function') {
               renderMainContent();
             }
           }
           // 50101 = still waiting, do nothing
         })
-        .catch(function() {});
+        .catch(function(err) {
+          console.warn('Status check error for', n.id, ':', err.message);
+        });
     });
   }, 1000);
+  
+  console.log('✅ SMS polling started');
 }
-
-console.log('✅ Direct polling started (no overrides possible)');
