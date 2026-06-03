@@ -2790,7 +2790,7 @@ window.closeBuyModal = function() {
   window.selectedBuyService = null;
 };
 
-// ===== REPLACE updateModalPrice WITH THIS VERSION - Shows price instantly =====
+// ===== FINAL FIX: Shows "Loading..." instead of skeleton =====
 window.updateModalPrice = function() {
   var service = window.selectedBuyService;
   if (!service) return;
@@ -2801,46 +2801,62 @@ window.updateModalPrice = function() {
   var buyBtn = document.getElementById('finalBuyBtn');
   if (!priceEl) return;
 
-  // ✅ FIX 1: Show default price IMMEDIATELY (no "Loading price...")
-  window.modalRealPrice = service.price;
-  window.modalServiceAvailable = true;
-  priceEl.textContent = '$' + service.price.toFixed(2);
-  priceEl.style.color = 'var(--accent)';
-  if (buyBtn) { 
-    buyBtn.disabled = false; 
-    buyBtn.innerHTML = '<i class="fas fa-phone-alt"></i> Get Number'; 
-  }
-
-  // Check cache and update silently (no loading indicator)
+  // ✅ Step 1: Check cache FIRST
   var cached = (typeof priceCache !== 'undefined') ? priceCache[countryCode] : null;
+  
   if (cached && Object.keys(cached).length > 0) {
-    if (cached[service.id] !== undefined) {
-      window.modalRealPrice = cached[service.id];
+    var cachedPrice = cached[service.id];
+    
+    if (cachedPrice !== undefined && cachedPrice !== null) {
+      // ✅ CACHED: Show price instantly
+      window.modalRealPrice = cachedPrice;
       window.modalServiceAvailable = true;
-      priceEl.textContent = '$' + cached[service.id].toFixed(2);
+      priceEl.textContent = '$' + cachedPrice.toFixed(2);
+      priceEl.style.color = 'var(--accent)';
+      if (buyBtn) { 
+        buyBtn.disabled = false; 
+        buyBtn.innerHTML = '<i class="fas fa-phone-alt"></i> Get Number'; 
+      }
+      return; 
     } else {
+      // Not available
       window.modalServiceAvailable = false;
       priceEl.textContent = 'Not available';
       priceEl.style.color = 'var(--danger)';
       if (buyBtn) { buyBtn.disabled = true; buyBtn.innerHTML = '<i class="fas fa-ban"></i> Unavailable'; }
+      return; 
     }
-    return;
   }
 
-  // Fetch in background and update silently
+  // ✅ Step 2: NOT CACHED - Show "Loading..." text
+  window.modalRealPrice = 0;
+  window.modalServiceAvailable = false;
+  priceEl.textContent = 'Loading...';
+  priceEl.style.color = 'var(--text-muted)';
+  if (buyBtn) { 
+    buyBtn.disabled = true; 
+    buyBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Checking...'; 
+  }
+
+  // ✅ Step 3: Fetch and reveal real price
   if (typeof fetchPricesForCountry === 'function') {
     fetchPricesForCountry(countryCode).then(function(prices) {
-      // Only update if modal is still open
       if (!document.getElementById('buyModalOverlay')) return;
       var currentCountry = document.getElementById('countrySelect');
       if (!currentCountry || currentCountry.value !== countryCode) return;
       
       if (prices && Object.keys(prices).length > 0) {
-        if (prices[service.id] !== undefined) {
-          window.modalRealPrice = prices[service.id];
+        var fetchedPrice = prices[service.id];
+        
+        if (fetchedPrice !== undefined && fetchedPrice !== null) {
+          window.modalRealPrice = fetchedPrice;
           window.modalServiceAvailable = true;
-          priceEl.textContent = '$' + prices[service.id].toFixed(2);
+          priceEl.textContent = '$' + fetchedPrice.toFixed(2);
           priceEl.style.color = 'var(--accent)';
+          if (buyBtn) { 
+            buyBtn.disabled = false; 
+            buyBtn.innerHTML = '<i class="fas fa-phone-alt"></i> Get Number'; 
+          }
         } else {
           window.modalServiceAvailable = false;
           priceEl.textContent = 'Not available';
@@ -2849,7 +2865,8 @@ window.updateModalPrice = function() {
         }
       }
     }).catch(function() {
-      // Silent fail - keep showing default price
+      priceEl.textContent = 'Error loading price';
+      priceEl.style.color = 'var(--danger)';
     });
   }
 };
