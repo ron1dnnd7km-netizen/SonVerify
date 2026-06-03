@@ -1319,7 +1319,7 @@ function loadHistoryFromCache() {
   return false;
 }
 
-// Load all history in PARALLEL (fast)
+// ===== REPLACE the loadUnifiedHistory function with this version =====
 window.loadUnifiedHistory = async function() {
   if (window.unifiedHistory.loading) return;
   window.unifiedHistory.loading = true;
@@ -1350,9 +1350,28 @@ window.loadUnifiedHistory = async function() {
     // Process SMS history
     var smsData = results[0].status === 'fulfilled' ? results[0].value : [];
     if (Array.isArray(smsData)) {
-      window.unifiedHistory.sms = smsData.map(function(h) {
+      // ✅ FIX 1: Deduplicate by phone number - keep only the LATEST entry per phone
+      var phoneMap = new Map();
+      smsData.forEach(function(h) {
+        var phoneKey = (h.phone || '').replace(/[^\d+]/g, ''); // Normalize phone
+        var existing = phoneMap.get(phoneKey);
+        
+        // If no existing entry, or this one is newer, or this one has a code (received)
+        if (!existing || 
+            (h.created_at && existing.created_at && new Date(h.created_at) > new Date(existing.created_at)) ||
+            (h.code && !existing.code)) {
+          phoneMap.set(phoneKey, h);
+        }
+      });
+      
+      // Convert map back to array and map statuses
+      window.unifiedHistory.sms = Array.from(phoneMap.values()).map(function(h) {
         var mappedStatus;
-        if (h.status === 'success' || h.status === 'received' || h.status === 'code_received') {
+        
+        // ✅ FIX 2: If there's a code, ALWAYS mark as received (never show expire)
+        if (h.code) {
+          mappedStatus = 'received';
+        } else if (h.status === 'success' || h.status === 'received' || h.status === 'code_received') {
           mappedStatus = 'received';
         } else if (h.status === 'cancelled' || h.status === 'canceled') {
           mappedStatus = 'cancelled';
@@ -1371,13 +1390,23 @@ window.loadUnifiedHistory = async function() {
           service_icon: h.service_icon,
           country_flag: h.country_flag,
           country_code: h.countryCode || h.country_code,
-          code: h.code,
+          code: h.code, // ✅ Keep code even if status was wrong
           cost: parseFloat(h.cost) || 0,
           status: mappedStatus,
-          created_at: h.created_at
+          created_at: h.created_at,
+          // ✅ Track if this was refunded
+          refunded: h.refunded || h.status === 'cancelled' || h.status === 'expired' || h.status === 'timeout'
         };
+      })
+      // ✅ FIX 3: Sort by created_at DESCENDING (newest first)
+      .sort(function(a, b) {
+        var dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
+        var dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
+        return dateB - dateA;
       });
     }
+    
+    // ... rest of the function stays the same (rent, cards processing)
     
     // Process Rent history
     var rentData = results[1].status === 'fulfilled' ? results[1].value : [];
@@ -1507,6 +1536,7 @@ function renderHistoryTabContent(container) {
   container.innerHTML = '<div style="display:flex;flex-direction:column;gap:10px;">' + html + '</div>';
 }
 
+// ===== REPLACE renderSmsHistoryItem with this version =====
 function renderSmsHistoryItem(h) {
   var service = (typeof services !== 'undefined') ? services.find(function(s) { return s.name.toLowerCase() === (h.service_name || '').toLowerCase(); }) : null;
   var ico = getServiceIconData(h.service_name, h.service_id, service ? service.icon : h.service_icon);
@@ -1525,10 +1555,41 @@ function renderSmsHistoryItem(h) {
     statusLabel = 'Timeout';
   }
   
-  var codeDisplay = h.code ? '<div style="font-family:JetBrains Mono,monospace;font-size:14px;font-weight:800;color:var(--accent);letter-spacing:2px;margin:0 8px;">' + h.code + '</div>' : '';
-  var dateStr = h.created_at ? new Date(h.created_at).toLocaleDateString() + ' ' + new Date(h.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+  // ✅ Don't show code for expired/timeout items
+  var codeDisplay = '';
+  if (h.code && (h.status === 'received' || h.status === 'success')) {
+    codeDisplay = '<div style="font-family:JetBrains Mono,monospace;font-size:14px;font-weight:800;color:var(--accent);letter-spacing:2px;margin:0 8px;">' + h.code + '</div>';
+  }
   
-  return '<div style="background:var(--bg-primary);border:1px solid var(--border);border-radius:12px;padding:12px;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;">' +
+  // ✅ FIX: Parse date correctly - handle both string and timestamp
+  var dateStr = '';
+  if (h.created_at) {
+    var dateObj;
+    if (typeof h.created_at === 'string') {
+      dateObj = new Date(h.created_at);
+      // If ISO parse failed, try SQLite format
+      if (isNaN(dateObj.getTime())) {
+        dateObj = new Date(h.created_at.replace(' ', 'T') + 'Z');
+      }
+    } else if (typeof h.created_at === 'number') {
+      // If it's a Unix timestamp in seconds (not milliseconds), convert
+      dateObj = new Date(h.created_at < 10000000000 ? h.created_at * 1000 : h.created_at);
+    } else {
+      dateObj = new Date(h.created_at);
+    }
+    
+    if (!isNaN(dateObj.getTime())) {
+      dateStr = dateObj.toLocaleDateString() + ' ' + dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+  }
+  
+  // ✅ Different border style based on status (NO opacity for better visibility)
+  var borderStyle = h.status === 'received' ? 'border-left:3px solid var(--accent);' : 
+                    h.status === 'cancelled' ? 'border-left:3px solid var(--text-muted);' : 
+                    'border-left:3px solid var(--danger);';
+  
+  // ✅ REMOVED: refundBadge - users don't need to see charge/refund info
+  return '<div style="background:var(--bg-primary);border:1px solid var(--border);border-radius:12px;padding:12px;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;' + borderStyle + '">' +
     '<div style="display:flex;align-items:center;gap:8px;flex:1;min-width:150px;">' +
       '<div style="font-size:18px;flex-shrink:0;">' + countryFlag + '</div>' +
       '<div style="width:28px;height:28px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;background:' + ico.bg + ';color:' + ico.color + ';">' + ico.html + '</div>' +
@@ -3000,11 +3061,10 @@ window.executeBuyNumber = function() {
   }
 };
 
-// ===== REPLACE BOTH POLLING BLOCKS WITH THIS SINGLE VERSION =====
+// ===== REPLACE the polling block with this corrected version =====
 if (!window._smsPollActive) {
   window._smsPollActive = true;
   
-  // Direct polling - bypasses any function overrides
   setInterval(function() {
     if (!window.activeNumbers || window.activeNumbers.length === 0) return;
     var now = Date.now();
@@ -3020,11 +3080,9 @@ if (!window._smsPollActive) {
       if (now - n._lastCheck < 5000) return;
       n._lastCheck = now;
       
-      // Direct API call
       fetch('/api/v2/status?request_id=' + realId)
         .then(function(r) { return r.json(); })
         .then(function(json) {
-          // Provider format: {"code":200,"data":"791625"} = CODE RECEIVED
           if (json.code === 200 && json.data && String(json.data).length >= 4) {
             var code = String(json.data).trim();
             console.log('✅ CODE RECEIVED:', code, 'for', n.phone);
@@ -3034,11 +3092,15 @@ if (!window._smsPollActive) {
             n.code = code;
             n.sms_text = 'Your verification code is ' + code;
             
-            // Save to server
+            // ✅ FIX: Tell backend this is SUCCESS - DO NOT refund
             fetch('/api/numbers/' + n.id + '/code', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ code: code, smsText: n.sms_text })
+              body: JSON.stringify({ 
+                code: code, 
+                smsText: n.sms_text,
+                refund: false  // ✅ Explicitly say NO REFUND
+              })
             }).catch(function() {});
             
             // Start grace period
@@ -3053,19 +3115,25 @@ if (!window._smsPollActive) {
             }
           } 
           else if (json.code === 50102) {
-            // Expired
-            console.log('⏰ Number expired:', n.phone);
+            // ✅ EXPIRED - This SHOULD trigger refund
+            console.log('⏰ Number expired:', n.phone, '- Refunding $' + n.cost);
             n.status = 'expired';
             n.time_left = 0;
             
-            fetch('/api/numbers/' + n.id + '/expire', { method: 'POST' }).catch(function() {});
+            // ✅ Tell backend to REFUND
+            fetch('/api/numbers/' + n.id + '/expire', { 
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ refund: true })  // ✅ Explicitly say REFUND
+            }).catch(function() {});
+            
+            // ✅ Reload balance to show refund
             if (typeof loadBalance === 'function') loadBalance();
             
             if (window.currentPage === 'numbers' && typeof renderMainContent === 'function') {
               renderMainContent();
             }
           }
-          // 50101 = still waiting, do nothing
         })
         .catch(function(err) {
           console.warn('Status check error for', n.id, ':', err.message);
@@ -3073,5 +3141,5 @@ if (!window._smsPollActive) {
     });
   }, 1000);
   
-  console.log('✅ SMS polling started');
+  console.log('✅ SMS polling started with correct refund logic');
 }

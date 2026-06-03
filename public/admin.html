@@ -17,6 +17,7 @@
   --danger2: #c53030;
   --warning: #d69e2e;
   --success: #38a169;
+  --info: #3182ce;
   --shadow: 0 1px 3px rgba(0,0,0,0.08);
   --radius: 12px;
 }
@@ -77,9 +78,10 @@ body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif
 .stat-card.green .value { color:var(--accent); }
 .stat-card.red .value { color:var(--danger); }
 .stat-card.yellow .value { color:var(--warning); }
+.stat-card.blue .value { color:var(--info); }
 
 /* TABLES */
-.table-wrap { background:var(--card); border:1px solid var(--border); border-radius:var(--radius); box-shadow:var(--shadow); overflow:hidden; }
+.table-wrap { background:var(--card); border:1px solid var(--border); border-radius:var(--radius); box-shadow:var(--shadow); overflow:hidden; margin-bottom:20px; }
 .table-header { display:flex; align-items:center; justify-content:space-between; padding:16px 20px; border-bottom:1px solid var(--border); flex-wrap:wrap; gap:10px; }
 .table-header h2 { font-size:16px; font-weight:700; }
 .table-search { padding:8px 12px; border:1px solid var(--border); border-radius:8px; font-size:13px; width:220px; outline:none; }
@@ -97,10 +99,13 @@ tr:hover td { background:rgba(13,155,122,0.03); }
 .status-completed { background:rgba(56,161,105,0.12); color:#276749; }
 .status-failed { background:rgba(229,62,62,0.12); color:#c53030; }
 .status-rejected { background:rgba(229,62,62,0.12); color:#c53030; }
-.status-waiting { background:rgba(66,153,225,0.12); color:#2b6cb0; }
+.status-waiting { background:rgba(49,130,206,0.12); color:#2b6cb0; }
 .status-received { background:rgba(56,161,105,0.12); color:#276749; }
 .status-expired { background:rgba(229,62,62,0.12); color:#c53030; }
 .status-success { background:rgba(56,161,105,0.12); color:#276749; }
+.status-active { background:rgba(13,155,122,0.12); color:#0b7d63; }
+.status-cancelled { background:rgba(113,128,150,0.12); color:#4a5568; }
+.status-frozen { background:rgba(49,130,206,0.12); color:#2b6cb0; }
 
 .action-btn { padding:4px 10px; border:none; border-radius:6px; font-size:11px; font-weight:600; cursor:pointer; margin-right:4px; }
 .btn-approve { background:rgba(56,161,105,0.12); color:#276749; }
@@ -113,6 +118,8 @@ tr:hover td { background:rgba(13,155,122,0.03); }
 .btn-delete:hover { background:var(--danger); color:#fff; }
 .btn-add { background:rgba(13,155,122,0.1); color:var(--accent); }
 .btn-add:hover { background:var(--accent); color:#fff; }
+.btn-info { background:rgba(49,130,206,0.1); color:var(--info); }
+.btn-info:hover { background:var(--info); color:#fff; }
 
 .pagination { display:flex; align-items:center; justify-content:center; gap:6px; padding:16px; }
 .page-btn { padding:6px 12px; border:1px solid var(--border); border-radius:6px; background:var(--card); font-size:12px; cursor:pointer; }
@@ -122,22 +129,34 @@ tr:hover td { background:rgba(13,155,122,0.03); }
 /* MODAL */
 .modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:200; align-items:center; justify-content:center; }
 .modal-overlay.show { display:flex; }
-.modal { background:var(--card); border-radius:16px; width:90%; max-width:600px; max-height:85vh; overflow-y:auto; box-shadow:0 20px 60px rgba(0,0,0,0.2); }
+.modal { background:var(--card); border-radius:16px; width:90%; max-width:650px; max-height:85vh; overflow-y:auto; box-shadow:0 20px 60px rgba(0,0,0,0.2); }
 .modal-head { display:flex; align-items:center; justify-content:space-between; padding:16px 20px; border-bottom:1px solid var(--border); }
 .modal-head h3 { font-size:16px; font-weight:700; }
 .modal-close { background:none; border:none; font-size:18px; cursor:pointer; color:var(--text2); padding:4px; }
 .modal-body { padding:20px; }
 .modal-row { display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid var(--border); font-size:13px; }
 .modal-row .label { color:var(--text2); }
-.modal-row .val { font-weight:600; text-align:right; }
+.modal-row .val { font-weight:600; text-align:right; max-width:60%; word-break:break-all; }
 .modal-section { font-size:12px; font-weight:700; color:var(--accent); margin:16px 0 8px; text-transform:uppercase; letter-spacing:0.5px; }
 
-/* BALANCE MODAL */
-.balance-form { display:flex; gap:8px; margin-top:12px; }
-.balance-form input { flex:1; padding:10px; border:1px solid var(--border); border-radius:8px; font-size:14px; outline:none; }
+.balance-form { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
+.balance-form input { flex:1; min-width:120px; padding:10px; border:1px solid var(--border); border-radius:8px; font-size:14px; outline:none; }
 .balance-form select { padding:10px; border:1px solid var(--border); border-radius:8px; font-size:13px; outline:none; }
 
+.card-preview { background:linear-gradient(135deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%); border-radius:14px; padding:20px; color:#fff; margin:12px 0; }
+.card-preview .brand { font-size:20px; font-weight:800; letter-spacing:2px; }
+.card-preview .number { font-family:'Courier New',monospace; font-size:16px; letter-spacing:2px; margin-top:12px; }
+.card-preview .holder { font-size:12px; text-transform:uppercase; letter-spacing:1px; }
+.card-preview .balance-display { background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.15); border-radius:8px; padding:6px 12px; text-align:right; }
+.card-preview .balance-label { font-size:8px; color:rgba(255,255,255,0.5); text-transform:uppercase; }
+.card-preview .balance-value { font-size:16px; font-weight:800; }
+
 .empty { text-align:center; padding:40px; color:var(--text2); }
+.empty i { font-size:40px; opacity:0.3; margin-bottom:12px; display:block; }
+.quick-stats { display:flex; gap:16px; margin-bottom:20px; flex-wrap:wrap; }
+.quick-stat { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:14px 18px; flex:1; min-width:140px; }
+.quick-stat .qs-label { font-size:11px; color:var(--text2); margin-bottom:4px; }
+.quick-stat .qs-value { font-size:20px; font-weight:700; }
 
 .toast-container { position:fixed; top:70px; right:20px; z-index:300; }
 .toast { padding:12px 20px; border-radius:10px; margin-bottom:8px; font-size:13px; font-weight:500; animation:slideIn 0.3s; box-shadow:0 4px 20px rgba(0,0,0,0.15); }
@@ -148,7 +167,6 @@ tr:hover td { background:rgba(13,155,122,0.03); }
 </head>
 <body>
 
-<!-- LOGIN SCREEN -->
 <div class="login-screen" id="loginScreen">
   <div class="login-box">
     <h1>🔒 Admin Panel</h1>
@@ -159,7 +177,6 @@ tr:hover td { background:rgba(13,155,122,0.03); }
   </div>
 </div>
 
-<!-- APP -->
 <div class="app" id="appScreen">
   <div class="topbar">
     <button class="mobile-toggle" onclick="toggleSidebar()">☰</button>
@@ -169,32 +186,31 @@ tr:hover td { background:rgba(13,155,122,0.03); }
       <button class="btn-logout" onclick="doLogout()">Logout</button>
     </div>
   </div>
-
   <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
   <div class="sidebar" id="sidebar">
-    <div class="nav-section">Main</div>
+    <div class="nav-section">Overview</div>
     <div class="nav-item active" data-page="dashboard" onclick="switchPage('dashboard')"><i class="fas fa-chart-pie"></i> Dashboard</div>
-    <div class="nav-section">Management</div>
+    <div class="nav-section">Users & Finance</div>
     <div class="nav-item" data-page="users" onclick="switchPage('users')"><i class="fas fa-users"></i> Users</div>
     <div class="nav-item" data-page="withdrawals" onclick="switchPage('withdrawals')"><i class="fas fa-money-bill-transfer"></i> Withdrawals <span class="badge" id="wdBadge" style="margin-left:auto;display:none;">0</span></div>
     <div class="nav-item" data-page="deposits" onclick="switchPage('deposits')"><i class="fas fa-arrow-down"></i> Deposits</div>
-    <div class="nav-item" data-page="numbers" onclick="switchPage('numbers')"><i class="fas fa-phone"></i> Numbers</div>
+    <div class="nav-section">SMS Services</div>
+    <div class="nav-item" data-page="numbers" onclick="switchPage('numbers')"><i class="fas fa-phone"></i> SMS Activations</div>
+    <div class="nav-section">Rent & Cards</div>
+    <div class="nav-item" data-page="rentals" onclick="switchPage('rentals')"><i class="fas fa-calendar-alt"></i> Rent Numbers</div>
+    <div class="nav-item" data-page="virtualcards" onclick="switchPage('virtualcards')"><i class="fas fa-credit-card"></i> Virtual Cards</div>
+    <div class="nav-item" data-page="giftcards" onclick="switchPage('giftcards')"><i class="fas fa-gift"></i> Gift Cards</div>
     <div class="nav-section">System</div>
     <div class="nav-item" data-page="referrals" onclick="switchPage('referrals')"><i class="fas fa-user-group"></i> Referrals</div>
   </div>
-
   <div class="main" id="mainContent"></div>
 </div>
 
 <div class="toast-container" id="toastContainer"></div>
 
-<!-- USER DETAIL MODAL -->
-<div class="modal-overlay" id="userModal">
-  <div class="modal">
-    <div class="modal-head"><h3 id="modalTitle">User Detail</h3><button class="modal-close" onclick="closeModal('userModal')">✕</button></div>
-    <div class="modal-body" id="modalBody"></div>
-  </div>
-</div>
+<div class="modal-overlay" id="userModal"><div class="modal"><div class="modal-head"><h3 id="modalTitle">User Detail</h3><button class="modal-close" onclick="closeModal('userModal')">✕</button></div><div class="modal-body" id="modalBody"></div></div></div>
+<div class="modal-overlay" id="rentalModal"><div class="modal"><div class="modal-head"><h3 id="rentalModalTitle">Rental Detail</h3><button class="modal-close" onclick="closeModal('rentalModal')">✕</button></div><div class="modal-body" id="rentalModalBody"></div></div></div>
+<div class="modal-overlay" id="cardModal"><div class="modal"><div class="modal-head"><h3 id="cardModalTitle">Card Detail</h3><button class="modal-close" onclick="closeModal('cardModal')">✕</button></div><div class="modal-body" id="cardModalBody"></div></div></div>
 
 <script>
 var token = '';
@@ -213,15 +229,13 @@ async function doLogin() {
   var pw = document.getElementById('adminPassword').value;
   if (!pw) return;
   var btn = document.getElementById('loginBtn');
-  btn.disabled = true;
-  btn.textContent = 'Signing in...';
+  btn.disabled = true; btn.textContent = 'Signing in...';
   try {
     var res = await fetch('/api/admin/login', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({password:pw}) });
     var data = await res.json();
     if (data.error) {
       document.getElementById('loginError').style.display = 'block';
-      btn.disabled = false;
-      btn.textContent = 'Sign In';
+      btn.disabled = false; btn.textContent = 'Sign In';
     } else {
       token = 'Bearer admin-' + pw;
       sessionStorage.setItem('admin_token', token);
@@ -231,8 +245,7 @@ async function doLogin() {
     }
   } catch(e) {
     document.getElementById('loginError').style.display = 'block';
-    btn.disabled = false;
-    btn.textContent = 'Sign In';
+    btn.disabled = false; btn.textContent = 'Sign In';
   }
 }
 
@@ -276,353 +289,474 @@ function switchPage(page) {
   else if (page === 'withdrawals') loadWithdrawals();
   else if (page === 'deposits') loadDeposits();
   else if (page === 'numbers') loadNumbers();
+  else if (page === 'rentals') loadRentals();
+  else if (page === 'virtualcards') loadVirtualCards();
+  else if (page === 'giftcards') loadGiftCards();
   else if (page === 'referrals') loadReferrals();
 }
 
 function fmtDate(d) { return d ? new Date(d).toLocaleString() : '—'; }
 function fmtMoney(n) { return '$' + parseFloat(n || 0).toFixed(2); }
 function statusClass(s) { return 'status status-' + (s || 'pending'); }
+function closeModal(id) { document.getElementById(id).classList.remove('show'); }
 
-// ====== DASHBOARD ======
-async function loadDashboard() {
-  var main = document.getElementById('mainContent');
-  main.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text2);">Loading...</div>';
-  try {
-    var s = await api('/api/admin/stats');
-    var wd = await api('/api/admin/withdrawals?status=pending');
+function renderPagination(cur, tot, fn) {
+  if (tot <= 1) return '';
+  var h = '<div class="pagination">';
+  h += '<button class="page-btn" ' + (cur <= 1 ? 'disabled' : '') + ' onclick="' + fn + '(' + (cur - 1) + ')">← Prev</button>';
+  var s = Math.max(1, cur - 2), e = Math.min(tot, cur + 2);
+  for (var i = s; i <= e; i++) h += '<button class="page-btn ' + (i === cur ? 'active' : '') + '" onclick="' + fn + '(' + i + ')">' + i + '</button>';
+  h += '<button class="page-btn" ' + (cur >= tot ? 'disabled' : '') + ' onclick="' + fn + '(' + (cur + 1) + ')">Next →</button></div>';
+  return h;
+}
 
-    // Update badges
+function fb(cur, val, label) {
+  return '<button class="filter-btn ' + (cur === val ? 'active' : '') + '" onclick="load' + label + '(1,\'' + val + '\')">' + (cur === val ? '✓ ' : '') + (arguments[3] || val) + '</button>';
+}
+
+// ====== DASHBOARD — INSTANT ======
+function loadDashboard() {
+  var m = document.getElementById('mainContent');
+  m.innerHTML =
+    '<div class="stats-grid">' +
+      '<div class="stat-card green"><div class="label">Total Users</div><div class="value" id="ds0">—</div><div class="sub">Registered accounts</div></div>' +
+      '<div class="stat-card"><div class="label">Total Balance</div><div class="value" id="ds1">—</div><div class="sub">Across all users</div></div>' +
+      '<div class="stat-card yellow"><div class="label">Active Numbers</div><div class="value" id="ds2">—</div><div class="sub">Waiting / Received</div></div>' +
+      '<div class="stat-card green"><div class="label">Total Deposits</div><div class="value" id="ds3">—</div><div class="sub" id="ds3b">Today: —</div></div>' +
+      '<div class="stat-card red"><div class="label">Pending Withdrawals</div><div class="value" id="ds4">—</div><div class="sub">Needs attention</div></div>' +
+      '<div class="stat-card blue"><div class="label">Active Rentals</div><div class="value" id="ds5">—</div><div class="sub">Rented numbers</div></div>' +
+      '<div class="stat-card green"><div class="label">Virtual Cards</div><div class="value" id="ds6">—</div><div class="sub">Created cards</div></div>' +
+      '<div class="stat-card green"><div class="label">Referral Commissions</div><div class="value" id="ds7">—</div><div class="sub" id="ds7b">0 total referrals</div></div>' +
+    '</div>' +
+    '<div class="table-wrap"><div class="table-header"><h2>⚠️ Pending Withdrawals</h2></div>' +
+    '<div style="overflow-x:auto;"><table><thead><tr><th>Email</th><th>Method</th><th>Amount</th><th>Address</th><th>Date</th><th>Actions</th></tr></thead>' +
+    '<tbody id="dashWd"><tr><td colspan="6" class="empty">No pending withdrawals</td></tr></tbody></table></div></div>';
+
+  api('/api/admin/stats').then(function(s) {
+    document.getElementById('ds0').textContent = s.totalUsers || 0;
+    document.getElementById('ds1').textContent = fmtMoney(s.totalBalance);
+    document.getElementById('ds2').textContent = s.activeNumbers || 0;
+    document.getElementById('ds3').textContent = fmtMoney(s.totalDeposits);
+    document.getElementById('ds3b').textContent = 'Today: ' + fmtMoney(s.todayDeposits);
+    document.getElementById('ds4').textContent = s.pendingWithdrawals || 0;
+    document.getElementById('ds5').textContent = s.activeRentals || 0;
+    document.getElementById('ds6').textContent = s.totalCards || 0;
+    document.getElementById('ds7').textContent = fmtMoney(s.totalCommissions);
+    document.getElementById('ds7b').textContent = (s.totalReferrals || 0) + ' total referrals';
     if (s.pendingWithdrawals > 0) {
       document.getElementById('pendingBadge').style.display = '';
       document.getElementById('pendingBadge').textContent = s.pendingWithdrawals;
       document.getElementById('wdBadge').style.display = '';
       document.getElementById('wdBadge').textContent = s.pendingWithdrawals;
+    } else {
+      document.getElementById('pendingBadge').style.display = 'none';
+      document.getElementById('wdBadge').style.display = 'none';
     }
+  }).catch(function() {});
 
-    main.innerHTML =
-      '<div class="stats-grid">' +
-        '<div class="stat-card green"><div class="label">Total Users</div><div class="value">' + s.totalUsers + '</div><div class="sub">Registered accounts</div></div>' +
-        '<div class="stat-card"><div class="label">Total Balance</div><div class="value">' + fmtMoney(s.totalBalance) + '</div><div class="sub">Across all users</div></div>' +
-        '<div class="stat-card yellow"><div class="label">Active Numbers</div><div class="value">' + s.activeNumbers + '</div><div class="sub">Waiting / Received</div></div>' +
-        '<div class="stat-card green"><div class="label">Total Deposits</div><div class="value">' + fmtMoney(s.totalDeposits) + '</div><div class="sub">Today: ' + fmtMoney(s.todayDeposits) + '</div></div>' +
-        '<div class="stat-card red"><div class="label">Pending Withdrawals</div><div class="value">' + s.pendingWithdrawals + '</div><div class="sub">Needs attention</div></div>' +
-        '<div class="stat-card green"><div class="label">Referral Commissions</div><div class="value">' + fmtMoney(s.totalCommissions) + '</div><div class="sub">' + s.totalReferrals + ' total referrals</div></div>' +
-      '</div>' +
-      '<div class="table-wrap">' +
-        '<div class="table-header"><h2>⚠️ Pending Withdrawals</h2></div>' +
-        (wd.withdrawals.length === 0 ? '<div class="empty">No pending withdrawals</div>' :
-        '<div style="overflow-x:auto;"><table><thead><tr><th>Email</th><th>Method</th><th>Amount</th><th>Address</th><th>Date</th><th>Actions</th></tr></thead><tbody>' +
-        wd.withdrawals.map(function(w) {
-          return '<tr><td>' + w.email + '</td><td>' + w.method + '</td><td><strong>' + fmtMoney(w.amount) + '</strong></td><td class="hide-mobile" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + (w.address || '') + '</td><td>' + fmtDate(w.created_at) + '</td><td>' +
-            '<button class="action-btn btn-approve" onclick="handleWithdrawal(' + w.id + ',\'approve\')">✓ Approve</button>' +
-            '<button class="action-btn btn-reject" onclick="handleWithdrawal(' + w.id + ',\'reject\')">✕ Reject</button>' +
-          '</td></tr>';
-        }).join('') + '</tbody></table></div>') +
-      '</div>';
-  } catch(e) {
-    main.innerHTML = '<div class="empty" style="color:var(--danger);">Error: ' + e.message + '</div>';
-  }
+  api('/api/admin/withdrawals?status=pending').then(function(d) {
+    var w = d.withdrawals || [];
+    var b = document.getElementById('dashWd');
+    if (!w.length) return;
+    b.innerHTML = w.map(function(x) {
+      return '<tr><td>' + x.email + '</td><td>' + x.method + '</td><td><strong>' + fmtMoney(x.amount) + '</strong></td>' +
+        '<td class="hide-mobile" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + (x.address || '') + '</td>' +
+        '<td>' + fmtDate(x.created_at) + '</td><td>' +
+        '<button class="action-btn btn-approve" onclick="handleWithdrawal(' + x.id + ',\'approve\')">✓ Approve</button>' +
+        '<button class="action-btn btn-reject" onclick="handleWithdrawal(' + x.id + ',\'reject\')">✕ Reject</button></td></tr>';
+    }).join('');
+  }).catch(function() {});
 }
 
-// ====== USERS ======
-var usersPage = 1;
-var usersSearch = '';
-
-async function loadUsers(page) {
+// ====== USERS — INSTANT ======
+var usersPage = 1, usersSearch = '';
+function loadUsers(page) {
   if (page) usersPage = page;
-  var main = document.getElementById('mainContent');
-  main.innerHTML = '<div class="empty">Loading...</div>';
-  try {
-    var q = usersSearch ? '&search=' + encodeURIComponent(usersSearch) : '';
-    var data = await api('/api/admin/users?page=' + usersPage + q);
-    main.innerHTML =
-      '<div class="table-wrap">' +
-        '<div class="table-header">' +
-          '<h2>Users (' + data.total + ')</h2>' +
-          '<input class="table-search" placeholder="Search email or ref code..." value="' + usersSearch + '" onkeydown="if(event.key===\'Enter\'){usersSearch=this.value;usersPage=1;loadUsers()}">' +
-        '</div>' +
-        '<div style="overflow-x:auto;"><table><thead><tr><th>Email</th><th class="hide-mobile">Ref Code</th><th>Balance</th><th class="hide-mobile">Spent</th><th class="hide-mobile">Referrals</th><th class="hide-mobile">Joined</th><th>Actions</th></tr></thead><tbody>' +
-        data.users.map(function(u) {
-          return '<tr>' +
-            '<td><strong>' + u.email + '</strong></td>' +
-            '<td class="hide-mobile" style="font-family:monospace;font-size:12px;color:var(--accent);">' + (u.referral_code || '—') + '</td>' +
-            '<td><strong>' + fmtMoney(u.balance) + '</strong></td>' +
-            '<td class="hide-mobile">' + fmtMoney(u.total_spent) + '</td>' +
-            '<td class="hide-mobile">' + u.referral_count + '</td>' +
-            '<td class="hide-mobile">' + fmtDate(u.created_at) + '</td>' +
-            '<td><button class="action-btn btn-view" onclick="viewUser(\'' + u.email + '\')">View</button><button class="action-btn btn-add" onclick="openBalanceModal(\'' + u.email + '\',' + u.balance + ')">💰</button></td>' +
-          '</tr>';
-        }).join('') +
-        '</tbody></table></div>' +
-        renderPagination(usersPage, data.pages, 'loadUsers') +
-      '</div>';
-  } catch(e) {
-    main.innerHTML = '<div class="empty" style="color:var(--danger);">Error: ' + e.message + '</div>';
-  }
+  var m = document.getElementById('mainContent');
+  m.innerHTML =
+    '<div class="table-wrap"><div class="table-header">' +
+      '<h2>Users (<span id="uTot">—</span>)</h2>' +
+      '<input class="table-search" placeholder="Search email or ref code..." value="' + usersSearch + '" onkeydown="if(event.key===\'Enter\'){usersSearch=this.value;usersPage=1;loadUsers()}">' +
+    '</div><div style="overflow-x:auto;"><table><thead><tr><th>Email</th><th class="hide-mobile">Ref Code</th><th>Balance</th><th class="hide-mobile">Spent</th><th class="hide-mobile">Referrals</th><th class="hide-mobile">Joined</th><th>Actions</th></tr></thead>' +
+    '<tbody id="uBody"></tbody></table></div><div id="uPag"></div></div>';
+
+  var q = usersSearch ? '&search=' + encodeURIComponent(usersSearch) : '';
+  api('/api/admin/users?page=' + usersPage + q).then(function(d) {
+    document.getElementById('uTot').textContent = d.total || 0;
+    var b = document.getElementById('uBody');
+    if (!d.users || !d.users.length) { b.innerHTML = '<tr><td colspan="7" class="empty">No users found</td></tr>'; document.getElementById('uPag').innerHTML = ''; return; }
+    b.innerHTML = d.users.map(function(u) {
+      return '<tr><td><strong>' + u.email + '</strong></td><td class="hide-mobile" style="font-family:monospace;font-size:12px;color:var(--accent);">' + (u.referral_code || '—') + '</td>' +
+        '<td><strong>' + fmtMoney(u.balance) + '</strong></td><td class="hide-mobile">' + fmtMoney(u.total_spent) + '</td>' +
+        '<td class="hide-mobile">' + (u.referral_count || 0) + '</td><td class="hide-mobile">' + fmtDate(u.created_at) + '</td>' +
+        '<td><button class="action-btn btn-view" onclick="viewUser(\'' + u.email + '\')">View</button><button class="action-btn btn-add" onclick="openBalanceModal(\'' + u.email + '\',' + u.balance + ')">💰</button></td></tr>';
+    }).join('');
+    document.getElementById('uPag').innerHTML = renderPagination(usersPage, d.pages || 1, 'loadUsers');
+  }).catch(function() { document.getElementById('uBody').innerHTML = '<tr><td colspan="7" class="empty" style="color:var(--danger);">Failed to load</td></tr>'; });
 }
 
 async function viewUser(email) {
   document.getElementById('modalTitle').textContent = 'User: ' + email;
-  document.getElementById('modalBody').innerHTML = '<div class="empty">Loading...</div>';
+  document.getElementById('modalBody').innerHTML = '<div class="empty"><i class="fas fa-spinner fa-spin"></i>Loading...</div>';
   document.getElementById('userModal').classList.add('show');
   try {
     var data = await api('/api/admin/user/' + encodeURIComponent(email));
+    var u = data.user || {};
     var h = '<div class="modal-section">Account Info</div>' +
-      '<div class="modal-row"><span class="label">Balance</span><span class="val" style="color:var(--accent);font-size:18px;">' + fmtMoney(data.user.balance) + '</span></div>' +
-      '<div class="modal-row"><span class="label">Referral Code</span><span class="val" style="font-family:monospace;">' + (data.user.referral_code || 'None') + '</span></div>' +
-      '<div class="modal-row"><span class="label">Referred By</span><span class="val">' + (data.user.referred_by || 'None') + '</span></div>' +
-      '<div class="modal-row"><span class="label">Joined</span><span class="val">' + fmtDate(data.user.created_at) + '</span></div>' +
-      '<div class="modal-section">Recent Numbers (' + data.numbers.length + ')</div>';
-
-    if (data.numbers.length === 0) h += '<div style="color:var(--text2);font-size:13px;padding:8px 0;">No numbers</div>';
-    else data.numbers.slice(0, 10).forEach(function(n) {
-      h += '<div class="modal-row"><span class="label">' + (n.service_name || '') + ' — ' + n.phone + '</span><span class="val"><span class="' + statusClass(n.status) + '">' + n.status + '</span> ' + fmtMoney(n.cost) + '</span></div>';
-    });
-
-    h += '<div class="modal-section">Purchase History (' + data.history.length + ')</div>';
-    if (data.history.length === 0) h += '<div style="color:var(--text2);font-size:13px;padding:8px 0;">No history</div>';
-    else data.history.slice(0, 10).forEach(function(hi) {
-      h += '<div class="modal-row"><span class="label">' + (hi.service_name || '') + ' — ' + (hi.phone || '') + '</span><span class="val"><span class="' + statusClass(hi.status) + '">' + hi.status + '</span>' + (hi.code ? ' Code: ' + hi.code : '') + ' ' + fmtMoney(hi.cost) + '</span></div>';
-    });
-
-    h += '<div class="modal-section">Referred Users (' + data.referred_users.length + ')</div>';
-    if (data.referred_users.length === 0) h += '<div style="color:var(--text2);font-size:13px;padding:8px 0;">No referrals</div>';
-    else data.referred_users.forEach(function(r) {
-      h += '<div class="modal-row"><span class="label">' + r.email + '</span><span class="val">' + fmtDate(r.created_at) + '</span></div>';
-    });
-
-    h += '<div style="margin-top:20px;text-align:right;"><button class="action-btn btn-delete" onclick="if(confirm(\'Delete this user permanently?\'))deleteUser(\'' + email + '\')" style="padding:8px 16px;font-size:13px;">🗑️ Delete User</button></div>';
-
+      '<div class="modal-row"><span class="label">Balance</span><span class="val" style="color:var(--accent);font-size:18px;">' + fmtMoney(u.balance) + '</span></div>' +
+      '<div class="modal-row"><span class="label">Total Spent</span><span class="val">' + fmtMoney(u.total_spent) + '</span></div>' +
+      '<div class="modal-row"><span class="label">Referral Code</span><span class="val" style="font-family:monospace;">' + (u.referral_code || 'None') + '</span></div>' +
+      '<div class="modal-row"><span class="label">Referred By</span><span class="val">' + (u.referred_by || 'None') + '</span></div>' +
+      '<div class="modal-row"><span class="label">Joined</span><span class="val">' + fmtDate(u.created_at) + '</span></div>' +
+      '<div class="modal-section">SMS Numbers (' + (data.numbers || []).length + ')</div>';
+    if (!(data.numbers || []).length) h += '<div style="color:var(--text2);font-size:13px;padding:8px 0;">No numbers</div>';
+    else (data.numbers || []).slice(0, 10).forEach(function(n) { h += '<div class="modal-row"><span class="label">' + (n.service_name || '') + ' — ' + n.phone + '</span><span class="val"><span class="' + statusClass(n.status) + '">' + n.status + '</span> ' + fmtMoney(n.cost) + '</span></div>'; });
+    h += '<div class="modal-section">Rentals (' + (data.rentals || []).length + ')</div>';
+    if (!(data.rentals || []).length) h += '<div style="color:var(--text2);font-size:13px;padding:8px 0;">No rentals</div>';
+    else (data.rentals || []).slice(0, 10).forEach(function(r) { h += '<div class="modal-row"><span class="label">' + r.phone + ' (' + (r.planName || '') + ')</span><span class="val"><span class="' + statusClass(r.status || 'active') + '">' + (r.status || 'active') + '</span> ' + fmtMoney(r.cost) + '</span></div>'; });
+    h += '<div class="modal-section">Virtual Cards (' + (data.cards || []).length + ')</div>';
+    if (!(data.cards || []).length) h += '<div style="color:var(--text2);font-size:13px;padding:8px 0;">No cards</div>';
+    else (data.cards || []).slice(0, 10).forEach(function(c) { h += '<div class="modal-row"><span class="label">' + (c.cardType || '') + ' — ' + (c.fullNumber || '').replace(/\d(?=.{4})/g, '•') + '</span><span class="val">' + fmtMoney(c.balance) + ' <span class="' + statusClass(c.frozen ? 'frozen' : 'active') + '">' + (c.frozen ? 'Frozen' : 'Active') + '</span></span></div>'; });
+    h += '<div class="modal-section">Referred Users (' + (data.referred_users || []).length + ')</div>';
+    if (!(data.referred_users || []).length) h += '<div style="color:var(--text2);font-size:13px;padding:8px 0;">No referrals</div>';
+    else (data.referred_users || []).forEach(function(r) { h += '<div class="modal-row"><span class="label">' + r.email + '</span><span class="val">' + fmtDate(r.created_at) + '</span></div>'; });
+    h += '<div style="margin-top:20px;display:flex;gap:8px;justify-content:flex-end;">' +
+      '<button class="action-btn btn-add" onclick="openBalanceModal(\'' + email + '\',' + u.balance + ')" style="padding:8px 16px;">💰 Adjust Balance</button>' +
+      '<button class="action-btn btn-delete" onclick="if(confirm(\'Delete this user permanently?\'))deleteUser(\'' + email + '\')" style="padding:8px 16px;">🗑️ Delete User</button></div>';
     document.getElementById('modalBody').innerHTML = h;
-  } catch(e) {
-    document.getElementById('modalBody').innerHTML = '<div class="empty" style="color:var(--danger);">Error: ' + e.message + '</div>';
-  }
+  } catch(e) { document.getElementById('modalBody').innerHTML = '<div class="empty" style="color:var(--danger);">Error: ' + e.message + '</div>'; }
 }
 
-function openBalanceModal(email, currentBalance) {
+function openBalanceModal(email, bal) {
   document.getElementById('modalTitle').textContent = 'Adjust Balance: ' + email;
   document.getElementById('modalBody').innerHTML =
-    '<p style="font-size:13px;color:var(--text2);margin-bottom:8px;">Current balance: <strong>' + fmtMoney(currentBalance) + '</strong></p>' +
-    '<div class="balance-form">' +
-      '<select id="balAction"><option value="add">Add</option><option value="subtract">Subtract</option><option value="set">Set to</option></select>' +
-      '<input type="number" id="balAmount" placeholder="0.00" step="0.01">' +
-      '<button class="action-btn btn-approve" onclick="adjustBalance(\'' + email + '\')" style="padding:8px 16px;">Apply</button>' +
-    '</div>';
+    '<p style="font-size:13px;color:var(--text2);margin-bottom:8px;">Current balance: <strong>' + fmtMoney(bal) + '</strong></p>' +
+    '<div class="balance-form"><select id="balAction"><option value="add">Add</option><option value="subtract">Subtract</option><option value="set">Set to</option></select>' +
+    '<input type="number" id="balAmount" placeholder="0.00" step="0.01">' +
+    '<input type="text" id="balReason" placeholder="Reason..." style="min-width:200px;">' +
+    '<button class="action-btn btn-approve" onclick="adjustBalance(\'' + email + '\')" style="padding:8px 16px;">Apply</button></div>';
   document.getElementById('userModal').classList.add('show');
 }
 
 async function adjustBalance(email) {
   var action = document.getElementById('balAction').value;
   var amount = parseFloat(document.getElementById('balAmount').value);
+  var reason = document.getElementById('balReason').value || 'Admin adjustment';
   if (isNaN(amount) || amount < 0) { showToast('Enter valid amount', 'error'); return; }
   if (action === 'subtract') amount = -amount;
-  if (action === 'set') { amount = amount - (await api('/api/admin/user/' + encodeURIComponent(email))).user.balance; }
-
+  if (action === 'set') { var ud = await api('/api/admin/user/' + encodeURIComponent(email)); amount = amount - (ud.user.balance || 0); }
   try {
-    var data = await apiPost('/api/admin/user/' + encodeURIComponent(email) + '/balance', { amount: amount, reason: 'Admin adjustment' });
+    var data = await apiPost('/api/admin/user/' + encodeURIComponent(email) + '/balance', { amount: amount, reason: reason });
     showToast('Balance updated to ' + fmtMoney(data.newBalance), 'success');
-    closeModal('userModal');
-    loadUsers();
+    closeModal('userModal'); loadUsers();
   } catch(e) { showToast(e.message, 'error'); }
 }
 
 async function deleteUser(email) {
-  try {
-    await apiDelete('/api/admin/user/' + encodeURIComponent(email));
-    showToast('User deleted', 'success');
-    closeModal('userModal');
-    loadUsers();
-  } catch(e) { showToast(e.message, 'error'); }
+  try { await apiDelete('/api/admin/user/' + encodeURIComponent(email)); showToast('User deleted', 'success'); closeModal('userModal'); loadUsers(); }
+  catch(e) { showToast(e.message, 'error'); }
 }
 
-function closeModal(id) { document.getElementById(id).classList.remove('show'); }
-
-// ====== WITHDRAWALS ======
-var wdPage = 1;
-var wdFilter = '';
-
-async function loadWithdrawals(page, status) {
+// ====== WITHDRAWALS — INSTANT ======
+var wdPage = 1, wdFilter = '';
+function loadWithdrawals(page, status) {
   if (page) wdPage = page;
   if (status !== undefined) { wdFilter = status; wdPage = 1; }
-  var main = document.getElementById('mainContent');
-  main.innerHTML = '<div class="empty">Loading...</div>';
-  try {
-    var q = wdFilter ? '&status=' + wdFilter : '';
-    var data = await api('/api/admin/withdrawals?page=' + wdPage + q);
-    main.innerHTML =
-      '<div class="table-wrap">' +
-        '<div class="table-header">' +
-          '<h2>Withdrawals (' + data.total + ')</h2>' +
-          '<div class="table-filters">' +
-            '<button class="filter-btn ' + (wdFilter === '' ? 'active' : '') + '" onclick="loadWithdrawals(1,\'\')">All</button>' +
-            '<button class="filter-btn ' + (wdFilter === 'pending' ? 'active' : '') + '" onclick="loadWithdrawals(1,\'pending\')">Pending</button>' +
-            '<button class="filter-btn ' + (wdFilter === 'completed' ? 'active' : '') + '" onclick="loadWithdrawals(1,\'completed\')">Completed</button>' +
-            '<button class="filter-btn ' + (wdFilter === 'rejected' ? 'active' : '') + '" onclick="loadWithdrawals(1,\'rejected\')">Rejected</button>' +
-          '</div>' +
-        '</div>' +
-        '<div style="overflow-x:auto;"><table><thead><tr><th>Email</th><th>Method</th><th>Amount</th><th class="hide-mobile">Address</th><th>Status</th><th>Date</th><th>Actions</th></tr></thead><tbody>' +
-        data.withdrawals.map(function(w) {
-          return '<tr>' +
-            '<td><strong>' + w.email + '</strong></td>' +
-            '<td>' + w.method + '</td>' +
-            '<td><strong>' + fmtMoney(w.amount) + '</strong></td>' +
-            '<td class="hide-mobile" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + (w.address || '') + '</td>' +
-            '<td><span class="' + statusClass(w.status) + '">' + w.status + '</span></td>' +
-            '<td>' + fmtDate(w.created_at) + '</td>' +
-            '<td>' +
-              (w.status === 'pending' ?
-                '<button class="action-btn btn-approve" onclick="handleWithdrawal(' + w.id + ',\'approve\')">✓</button>' +
-                '<button class="action-btn btn-reject" onclick="handleWithdrawal(' + w.id + ',\'reject\')">✕</button>' : '—') +
-            '</td></tr>';
-        }).join('') +
-        '</tbody></table></div>' +
-        renderPagination(wdPage, data.pages, 'loadWithdrawals') +
-      '</div>';
-  } catch(e) {
-    main.innerHTML = '<div class="empty" style="color:var(--danger);">Error: ' + e.message + '</div>';
-  }
+  var m = document.getElementById('mainContent');
+  m.innerHTML =
+    '<div class="table-wrap"><div class="table-header"><h2>Withdrawals (<span id="wdTot">—</span>)</h2>' +
+    '<div class="table-filters">' + fb(wdFilter, '', 'All') + fb(wdFilter, 'pending', 'Pending') + fb(wdFilter, 'completed', 'Completed') + fb(wdFilter, 'rejected', 'Rejected') + '</div></div>' +
+    '<div style="overflow-x:auto;"><table><thead><tr><th>Email</th><th>Method</th><th>Amount</th><th class="hide-mobile">Address</th><th>Status</th><th>Date</th><th>Actions</th></tr></thead>' +
+    '<tbody id="wdBody"></tbody></table></div><div id="wdPag"></div></div>';
+
+  var q = wdFilter ? '&status=' + wdFilter : '';
+  api('/api/admin/withdrawals?page=' + wdPage + q).then(function(d) {
+    document.getElementById('wdTot').textContent = d.total || 0;
+    var b = document.getElementById('wdBody');
+    if (!d.withdrawals || !d.withdrawals.length) { b.innerHTML = '<tr><td colspan="7" class="empty">No withdrawals</td></tr>'; document.getElementById('wdPag').innerHTML = ''; return; }
+    b.innerHTML = d.withdrawals.map(function(w) {
+      return '<tr><td><strong>' + w.email + '</strong></td><td>' + w.method + '</td><td><strong>' + fmtMoney(w.amount) + '</strong></td>' +
+        '<td class="hide-mobile" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + (w.address || '') + '</td>' +
+        '<td><span class="' + statusClass(w.status) + '">' + w.status + '</span></td><td>' + fmtDate(w.created_at) + '</td>' +
+        '<td>' + (w.status === 'pending' ? '<button class="action-btn btn-approve" onclick="handleWithdrawal(' + w.id + ',\'approve\')">✓</button><button class="action-btn btn-reject" onclick="handleWithdrawal(' + w.id + ',\'reject\')">✕</button>' : '—') + '</td></tr>';
+    }).join('');
+    document.getElementById('wdPag').innerHTML = renderPagination(wdPage, d.pages || 1, 'loadWithdrawals');
+  }).catch(function() { document.getElementById('wdBody').innerHTML = '<tr><td colspan="7" class="empty" style="color:var(--danger);">Failed to load</td></tr>'; });
 }
 
 async function handleWithdrawal(id, action) {
   if (!confirm('Are you sure you want to ' + action + ' this withdrawal?')) return;
-  try {
-    var data = await apiPost('/api/admin/withdrawal/' + id, { action: action });
-    showToast('Withdrawal ' + data.status, 'success');
-    loadWithdrawals();
-    loadDashboard();
-  } catch(e) { showToast(e.message, 'error'); }
+  try { var d = await apiPost('/api/admin/withdrawal/' + id, { action: action }); showToast('Withdrawal ' + d.status, 'success'); loadWithdrawals(); loadDashboard(); }
+  catch(e) { showToast(e.message, 'error'); }
 }
 
-// ====== DEPOSITS ======
-var depPage = 1;
-var depFilter = '';
-
-async function loadDeposits(page, status) {
+// ====== DEPOSITS — INSTANT ======
+var depPage = 1, depFilter = '';
+function loadDeposits(page, status) {
   if (page) depPage = page;
   if (status !== undefined) { depFilter = status; depPage = 1; }
-  var main = document.getElementById('mainContent');
-  main.innerHTML = '<div class="empty">Loading...</div>';
-  try {
-    var q = depFilter ? '&status=' + depFilter : '';
-    var data = await api('/api/admin/deposits?page=' + depPage + q);
-    main.innerHTML =
-      '<div class="table-wrap">' +
-        '<div class="table-header">' +
-          '<h2>Deposits (' + data.total + ')</h2>' +
-          '<div class="table-filters">' +
-            '<button class="filter-btn ' + (depFilter === '' ? 'active' : '') + '" onclick="loadDeposits(1,\'\')">All</button>' +
-            '<button class="filter-btn ' + (depFilter === 'pending' ? 'active' : '') + '" onclick="loadDeposits(1,\'pending\')">Pending</button>' +
-            '<button class="filter-btn ' + (depFilter === 'completed' ? 'active' : '') + '" onclick="loadDeposits(1,\'completed\')">Completed</button>' +
-            '<button class="filter-btn ' + (depFilter === 'failed' ? 'active' : '') + '" onclick="loadDeposits(1,\'failed\')">Failed</button>' +
-          '</div>' +
-        '</div>' +
-        '<div style="overflow-x:auto;"><table><thead><tr><th>Email</th><th>Amount</th><th class="hide-mobile">Method</th><th class="hide-mobile">Reference</th><th>Status</th><th>Date</th></tr></thead><tbody>' +
-        data.deposits.map(function(d) {
-          return '<tr>' +
-            '<td><strong>' + d.email + '</strong></td>' +
-            '<td><strong>' + fmtMoney(d.amount) + '</strong></td>' +
-            '<td class="hide-mobile">' + (d.method || d.pay_currency || '') + '</td>' +
-            '<td class="hide-mobile" style="font-family:monospace;font-size:11px;">' + (d.reference || '') + '</td>' +
-            '<td><span class="' + statusClass(d.status) + '">' + d.status + '</span></td>' +
-            '<td>' + fmtDate(d.created_at) + '</td></tr>';
-        }).join('') +
-        '</tbody></table></div>' +
-        renderPagination(depPage, data.pages, 'loadDeposits') +
-      '</div>';
-  } catch(e) {
-    main.innerHTML = '<div class="empty" style="color:var(--danger);">Error: ' + e.message + '</div>';
-  }
+  var m = document.getElementById('mainContent');
+  m.innerHTML =
+    '<div class="table-wrap"><div class="table-header"><h2>Deposits (<span id="depTot">—</span>)</h2>' +
+    '<div class="table-filters">' + fb(depFilter, '', 'All') + fb(depFilter, 'pending', 'Pending') + fb(depFilter, 'completed', 'Completed') + fb(depFilter, 'failed', 'Failed') + '</div></div>' +
+    '<div style="overflow-x:auto;"><table><thead><tr><th>Email</th><th>Amount</th><th class="hide-mobile">Method</th><th class="hide-mobile">Reference</th><th>Status</th><th>Date</th></tr></thead>' +
+    '<tbody id="depBody"></tbody></table></div><div id="depPag"></div></div>';
+
+  var q = depFilter ? '&status=' + depFilter : '';
+  api('/api/admin/deposits?page=' + depPage + q).then(function(d) {
+    document.getElementById('depTot').textContent = d.total || 0;
+    var b = document.getElementById('depBody');
+    if (!d.deposits || !d.deposits.length) { b.innerHTML = '<tr><td colspan="6" class="empty">No deposits</td></tr>'; document.getElementById('depPag').innerHTML = ''; return; }
+    b.innerHTML = d.deposits.map(function(x) {
+      return '<tr><td><strong>' + x.email + '</strong></td><td><strong>' + fmtMoney(x.amount) + '</strong></td>' +
+        '<td class="hide-mobile">' + (x.method || x.pay_currency || '') + '</td>' +
+        '<td class="hide-mobile" style="font-family:monospace;font-size:11px;">' + (x.reference || '') + '</td>' +
+        '<td><span class="' + statusClass(x.status) + '">' + x.status + '</span></td><td>' + fmtDate(x.created_at) + '</td></tr>';
+    }).join('');
+    document.getElementById('depPag').innerHTML = renderPagination(depPage, d.pages || 1, 'loadDeposits');
+  }).catch(function() { document.getElementById('depBody').innerHTML = '<tr><td colspan="6" class="empty" style="color:var(--danger);">Failed to load</td></tr>'; });
 }
 
-// ====== NUMBERS ======
-var numPage = 1;
-var numFilter = '';
-
-async function loadNumbers(page, status) {
+// ====== NUMBERS — INSTANT ======
+var numPage = 1, numFilter = '';
+function loadNumbers(page, status) {
   if (page) numPage = page;
   if (status !== undefined) { numFilter = status; numPage = 1; }
-  var main = document.getElementById('mainContent');
-  main.innerHTML = '<div class="empty">Loading...</div>';
+  var m = document.getElementById('mainContent');
+  m.innerHTML =
+    '<div class="table-wrap"><div class="table-header"><h2>SMS Activations (<span id="numTot">—</span>)</h2>' +
+    '<div class="table-filters">' + fb(numFilter, '', 'All') + fb(numFilter, 'waiting', 'Waiting') + fb(numFilter, 'received', 'Received') + fb(numFilter, 'expired', 'Expired') + fb(numFilter, 'cancelled', 'Cancelled') + '</div></div>' +
+    '<div style="overflow-x:auto;"><table><thead><tr><th>Email</th><th>Service</th><th class="hide-mobile">Phone</th><th class="hide-mobile">Code</th><th>Status</th><th>Cost</th><th class="hide-mobile">Date</th></tr></thead>' +
+    '<tbody id="numBody"></tbody></table></div><div id="numPag"></div></div>';
+
+  var q = numFilter ? '&status=' + numFilter : '';
+  api('/api/admin/numbers?page=' + numPage + q).then(function(d) {
+    document.getElementById('numTot').textContent = d.total || 0;
+    var b = document.getElementById('numBody');
+    if (!d.numbers || !d.numbers.length) { b.innerHTML = '<tr><td colspan="7" class="empty">No numbers</td></tr>'; document.getElementById('numPag').innerHTML = ''; return; }
+    b.innerHTML = d.numbers.map(function(n) {
+      return '<tr><td>' + n.email + '</td><td>' + (n.service_name || '') + '</td>' +
+        '<td class="hide-mobile" style="font-family:monospace;">' + n.phone + '</td>' +
+        '<td class="hide-mobile" style="font-family:monospace;font-weight:700;color:var(--accent);">' + (n.code || '—') + '</td>' +
+        '<td><span class="' + statusClass(n.status) + '">' + n.status + '</span></td><td>' + fmtMoney(n.cost) + '</td>' +
+        '<td class="hide-mobile">' + fmtDate(n.created_at) + '</td></tr>';
+    }).join('');
+    document.getElementById('numPag').innerHTML = renderPagination(numPage, d.pages || 1, 'loadNumbers');
+  }).catch(function() { document.getElementById('numBody').innerHTML = '<tr><td colspan="7" class="empty" style="color:var(--danger);">Failed to load</td></tr>'; });
+}
+
+// ====== RENTALS — INSTANT ======
+var rentPage = 1, rentFilter = '';
+function loadRentals(page, status) {
+  if (page) rentPage = page;
+  if (status !== undefined) { rentFilter = status; rentPage = 1; }
+  var m = document.getElementById('mainContent');
+  m.innerHTML =
+    '<div class="quick-stats"><div class="quick-stat"><div class="qs-label">Total Rentals</div><div class="qs-value" id="rs0">—</div></div>' +
+    '<div class="quick-stat"><div class="qs-label">Active Now</div><div class="qs-value" style="color:var(--accent);" id="rs1">—</div></div>' +
+    '<div class="quick-stat"><div class="qs-label">Total Revenue</div><div class="qs-value" id="rs2">—</div></div>' +
+    '<div class="quick-stat"><div class="qs-label">Active Revenue</div><div class="qs-value" style="color:var(--accent);" id="rs3">—</div></div></div>' +
+    '<div class="table-wrap"><div class="table-header"><h2>Rent Numbers (<span id="rentTot">—</span>)</h2>' +
+    '<div class="table-filters">' + fb(rentFilter, '', 'All') + fb(rentFilter, 'active', 'Active') + fb(rentFilter, 'expired', 'Expired') + fb(rentFilter, 'cancelled', 'Cancelled') + '</div></div>' +
+    '<div style="overflow-x:auto;"><table><thead><tr><th>Email</th><th>Phone</th><th class="hide-mobile">Country</th><th>Plan</th><th class="hide-mobile">SMS</th><th>Status</th><th>Cost</th><th class="hide-mobile">Expires</th><th>Actions</th></tr></thead>' +
+    '<tbody id="rentBody"></tbody></table></div><div id="rentPag"></div></div>';
+
+  var q = rentFilter ? '&status=' + rentFilter : '';
+  api('/api/admin/rentals?page=' + rentPage + q).then(function(d) {
+    var r = d.rentals || [];
+    document.getElementById('rentTot').textContent = d.total || 0;
+    var ac = r.filter(function(x) { return x.status === 'active'; }).length;
+    var tr = r.reduce(function(s, x) { return s + (parseFloat(x.cost) || 0); }, 0);
+    var ar = r.filter(function(x) { return x.status === 'active'; }).reduce(function(s, x) { return s + (parseFloat(x.cost) || 0); }, 0);
+    document.getElementById('rs0').textContent = d.total || 0;
+    document.getElementById('rs1').textContent = ac;
+    document.getElementById('rs2').textContent = fmtMoney(tr);
+    document.getElementById('rs3').textContent = fmtMoney(ar);
+    var b = document.getElementById('rentBody');
+    if (!r.length) { b.innerHTML = '<tr><td colspan="9" class="empty">No rentals</td></tr>'; document.getElementById('rentPag').innerHTML = ''; return; }
+    b.innerHTML = r.map(function(x) {
+      var sc2 = (x.sms && x.sms.length) ? x.sms.length : 0;
+      var ex = x.expiresAt ? new Date(x.expiresAt) : null;
+      var ds = x.status || (ex && ex < new Date() ? 'expired' : 'active');
+      return '<tr><td>' + x.email + '</td><td style="font-family:monospace;font-weight:600;">' + (x.phone || '') + '</td>' +
+        '<td class="hide-mobile">' + (x.countryFlag || '') + ' ' + (x.countryName || '') + '</td><td>' + (x.planName || '1 Month') + '</td>' +
+        '<td class="hide-mobile"><strong>' + sc2 + '</strong></td><td><span class="' + statusClass(ds) + '">' + ds + '</span></td>' +
+        '<td><strong>' + fmtMoney(x.cost) + '</strong></td><td class="hide-mobile">' + (ex ? ex.toLocaleDateString() : '—') + '</td>' +
+        '<td>' + (ds === 'active' ? '<button class="action-btn btn-view" onclick="viewRentalDetail(\'' + x.id + '\')">View</button>' : '—') + '</td></tr>';
+    }).join('');
+    document.getElementById('rentPag').innerHTML = renderPagination(rentPage, d.pages || 1, 'loadRentals');
+  }).catch(function() { document.getElementById('rentBody').innerHTML = '<tr><td colspan="9" class="empty" style="color:var(--danger);">Failed to load</td></tr>'; });
+}
+
+async function viewRentalDetail(rentalId) {
+  document.getElementById('rentalModalTitle').textContent = 'Rental Detail: ' + rentalId;
+  document.getElementById('rentalModalBody').innerHTML = '<div class="empty"><i class="fas fa-spinner fa-spin"></i>Loading...</div>';
+  document.getElementById('rentalModal').classList.add('show');
   try {
-    var q = numFilter ? '&status=' + numFilter : '';
-    var data = await api('/api/admin/numbers?page=' + numPage + q);
-    main.innerHTML =
-      '<div class="table-wrap">' +
-        '<div class="table-header">' +
-          '<h2>Numbers (' + data.total + ')</h2>' +
-          '<div class="table-filters">' +
-            '<button class="filter-btn ' + (numFilter === '' ? 'active' : '') + '" onclick="loadNumbers(1,\'\')">All</button>' +
-            '<button class="filter-btn ' + (numFilter === 'waiting' ? 'active' : '') + '" onclick="loadNumbers(1,\'waiting\')">Waiting</button>' +
-            '<button class="filter-btn ' + (numFilter === 'received' ? 'active' : '') + '" onclick="loadNumbers(1,\'received\')">Received</button>' +
-            '<button class="filter-btn ' + (numFilter === 'expired' ? 'active' : '') + '" onclick="loadNumbers(1,\'expired\')">Expired</button>' +
-          '</div>' +
-        '</div>' +
-        '<div style="overflow-x:auto;"><table><thead><tr><th>Email</th><th>Service</th><th class="hide-mobile">Phone</th><th class="hide-mobile">Code</th><th>Status</th><th>Cost</th><th class="hide-mobile">Date</th></tr></thead><tbody>' +
-        data.numbers.map(function(n) {
-          return '<tr>' +
-            '<td>' + n.email + '</td>' +
-            '<td>' + (n.service_name || '') + '</td>' +
-            '<td class="hide-mobile" style="font-family:monospace;">' + n.phone + '</td>' +
-            '<td class="hide-mobile" style="font-family:monospace;font-weight:700;color:var(--accent);">' + (n.code || '—') + '</td>' +
-            '<td><span class="' + statusClass(n.status) + '">' + n.status + '</span></td>' +
-            '<td>' + fmtMoney(n.cost) + '</td>' +
-            '<td class="hide-mobile">' + fmtDate(n.created_at) + '</td></tr>';
-        }).join('') +
-        '</tbody></table></div>' +
-        renderPagination(numPage, data.pages, 'loadNumbers') +
-      '</div>';
-  } catch(e) {
-    main.innerHTML = '<div class="empty" style="color:var(--danger);">Error: ' + e.message + '</div>';
-  }
+    var data = await api('/api/admin/rental/' + rentalId);
+    var r = data.rental || data; var smsList = r.sms || [];
+    var html = '<div class="modal-section">Rental Info</div>' +
+      '<div class="modal-row"><span class="label">Phone</span><span class="val" style="font-family:monospace;font-size:16px;font-weight:700;">' + (r.phone || '') + '</span></div>' +
+      '<div class="modal-row"><span class="label">Email</span><span class="val">' + (r.email || '') + '</span></div>' +
+      '<div class="modal-row"><span class="label">Country</span><span class="val">' + (r.countryFlag || '') + ' ' + (r.countryName || '') + '</span></div>' +
+      '<div class="modal-row"><span class="label">Plan</span><span class="val">' + (r.planName || '') + '</span></div>' +
+      '<div class="modal-row"><span class="label">Cost</span><span class="val" style="color:var(--accent);font-weight:700;">' + fmtMoney(r.cost) + '</span></div>' +
+      '<div class="modal-row"><span class="label">Status</span><span class="val"><span class="' + statusClass(r.status) + '">' + (r.status || 'active') + '</span></span></div>' +
+      '<div class="modal-row"><span class="label">Created</span><span class="val">' + fmtDate(r.createdAt) + '</span></div>' +
+      '<div class="modal-row"><span class="label">Expires</span><span class="val">' + fmtDate(r.expiresAt) + '</span></div>' +
+      '<div class="modal-row"><span class="label">Provider ID</span><span class="val" style="font-family:monospace;font-size:11px;">' + (r.smsFetchId || r.id) + '</span></div>';
+    html += '<div class="modal-section">SMS Messages (' + smsList.length + ')</div>';
+    if (!smsList.length) html += '<div style="color:var(--text2);font-size:13px;padding:8px 0;">No SMS received yet</div>';
+    else smsList.forEach(function(sms) {
+      html += '<div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:8px;">' +
+        '<div style="display:flex;justify-content:space-between;margin-bottom:6px;"><span style="font-size:11px;font-weight:700;color:var(--accent);">FROM: ' + (sms.sender || 'Unknown') + '</span><span style="font-size:11px;color:var(--text2);">' + fmtDate(sms.receivedAt) + '</span></div>' +
+        '<div style="font-size:13px;word-break:break-all;">' + (sms.text || '') + '</div></div>';
+    });
+    html += '<div style="margin-top:20px;text-align:right;"><button class="action-btn btn-delete" onclick="if(confirm(\'Cancel this rental?\'))cancelRentalAdmin(\'' + rentalId + '\')" style="padding:8px 16px;">Cancel Rental</button></div>';
+    document.getElementById('rentalModalBody').innerHTML = html;
+  } catch(e) { document.getElementById('rentalModalBody').innerHTML = '<div class="empty" style="color:var(--danger);">Error: ' + e.message + '</div>'; }
 }
 
-// ====== REFERRALS ======
-async function loadReferrals() {
-  var main = document.getElementById('mainContent');
-  main.innerHTML = '<div class="empty">Loading...</div>';
+async function cancelRentalAdmin(rentalId) {
+  try { await apiPost('/api/admin/rental/' + rentalId + '/cancel', {}); showToast('Rental cancelled', 'success'); closeModal('rentalModal'); loadRentals(); }
+  catch(e) { showToast(e.message, 'error'); }
+}
+
+// ====== VIRTUAL CARDS — INSTANT ======
+var cardPage = 1, cardFilter = '';
+function loadVirtualCards(page, filter) {
+  if (page) cardPage = page;
+  if (filter !== undefined) { cardFilter = filter; cardPage = 1; }
+  var m = document.getElementById('mainContent');
+  m.innerHTML =
+    '<div class="quick-stats"><div class="quick-stat"><div class="qs-label">Total Cards</div><div class="qs-value" id="cs0">—</div></div>' +
+    '<div class="quick-stat"><div class="qs-label">Active</div><div class="qs-value" style="color:var(--accent);" id="cs1">—</div></div>' +
+    '<div class="quick-stat"><div class="qs-label">Frozen</div><div class="qs-value" style="color:var(--info);" id="cs2">—</div></div>' +
+    '<div class="quick-stat"><div class="qs-label">Total Balance</div><div class="qs-value" id="cs3">—</div></div></div>' +
+    '<div class="table-wrap"><div class="table-header"><h2>Virtual Cards (<span id="cardTot">—</span>)</h2>' +
+    '<div class="table-filters">' + fb(cardFilter, '', 'All') + fb(cardFilter, 'active', 'Active') + fb(cardFilter, 'frozen', 'Frozen') + '</div></div>' +
+    '<div style="overflow-x:auto;"><table><thead><tr><th>Email</th><th>Type</th><th class="hide-mobile">Number</th><th class="hide-mobile">CVV</th><th class="hide-mobile">Expiry</th><th>Balance</th><th>Status</th><th class="hide-mobile">Created</th><th>Actions</th></tr></thead>' +
+    '<tbody id="cardBody"></tbody></table></div><div id="cardPag"></div></div>';
+
+  var q = cardFilter ? '&filter=' + cardFilter : '';
+  api('/api/admin/cards?page=' + cardPage + q).then(function(d) {
+    var c = d.cards || [];
+    document.getElementById('cardTot').textContent = d.total || 0;
+    var ac = c.filter(function(x) { return !x.frozen; }).length;
+    var fr = c.filter(function(x) { return x.frozen; }).length;
+    var tb = c.reduce(function(s, x) { return s + (parseFloat(x.balance) || 0); }, 0);
+    document.getElementById('cs0').textContent = d.total || 0;
+    document.getElementById('cs1').textContent = ac;
+    document.getElementById('cs2').textContent = fr;
+    document.getElementById('cs3').textContent = fmtMoney(tb);
+    var b = document.getElementById('cardBody');
+    if (!c.length) { b.innerHTML = '<tr><td colspan="9" class="empty">No cards</td></tr>'; document.getElementById('cardPag').innerHTML = ''; return; }
+    b.innerHTML = c.map(function(x) {
+      var mn = x.fullNumber ? x.fullNumber.replace(/\d(?=.{4})/g, '•') : '—';
+      return '<tr><td>' + x.email + '</td><td>' + (x.cardType || 'visa-basic') + '</td>' +
+        '<td class="hide-mobile" style="font-family:monospace;">' + mn + '</td>' +
+        '<td class="hide-mobile" style="font-family:monospace;">' + (x.cvv || '***') + '</td>' +
+        '<td class="hide-mobile">' + (x.expDate || '—') + '</td><td><strong>' + fmtMoney(x.balance) + '</strong></td>' +
+        '<td><span class="' + statusClass(x.frozen ? 'frozen' : 'active') + '">' + (x.frozen ? 'Frozen' : 'Active') + '</span></td>' +
+        '<td class="hide-mobile">' + fmtDate(x.createdAt) + '</td><td><button class="action-btn btn-view" onclick="viewCardDetail(\'' + x.id + '\')">View</button></td></tr>';
+    }).join('');
+    document.getElementById('cardPag').innerHTML = renderPagination(cardPage, d.pages || 1, 'loadVirtualCards');
+  }).catch(function() { document.getElementById('cardBody').innerHTML = '<tr><td colspan="9" class="empty" style="color:var(--danger);">Failed to load</td></tr>'; });
+}
+
+async function viewCardDetail(cardId) {
+  document.getElementById('cardModalTitle').textContent = 'Card Detail';
+  document.getElementById('cardModalBody').innerHTML = '<div class="empty"><i class="fas fa-spinner fa-spin"></i>Loading...</div>';
+  document.getElementById('cardModal').classList.add('show');
   try {
-    var data = await api('/api/admin/referrals');
-    var refUsers = data.referrers || [];
-    
-    main.innerHTML =
-      '<div class="table-wrap">' +
-        '<div class="table-header"><h2>🏆 Top Referrers (' + refUsers.length + ' users with referrals)</h2></div>' +
-        (refUsers.length === 0 ? '<div class="empty">No referral activity yet</div>' :
-        '<div style="overflow-x:auto;"><table><thead><tr><th>Rank</th><th>Email</th><th>Ref Code</th><th>Referrals</th><th class="hide-mobile">Spent by Referrals</th><th class="hide-mobile">Commission Earned</th><th>Actions</th></tr></thead><tbody>' +
-        refUsers.map(function(u, i) {
-          return '<tr>' +
-            '<td><strong>#' + (i + 1) + '</strong></td>' +
-            '<td><strong>' + u.email + '</strong></td>' +
-            '<td style="font-family:monospace;font-size:12px;color:var(--accent);">' + (u.referral_code || '') + '</td>' +
-            '<td><strong>' + u.referral_count + '</strong></td>' +
-            '<td class="hide-mobile">' + fmtMoney(u.total_spent_by_referrals) + '</td>' +
-            '<td class="hide-mobile" style="color:var(--accent);font-weight:700;">' + fmtMoney(u.commission_earned) + '</td>' +
-            '<td><button class="action-btn btn-view" onclick="viewUser(\'' + u.email + '\')">View</button></td>' +
-          '</tr>';
-        }).join('') +
-        '</tbody></table></div>') +
-      '</div>';
-  } catch(e) {
-    main.innerHTML = '<div class="empty" style="color:var(--danger);">Error: ' + e.message + '</div>';
-  }
+    var data = await api('/api/admin/card/' + cardId);
+    var c = data.card || data;
+    var brands = { 'visa-basic': 'VISA', 'mastercard-standard': 'MC', 'visa-premium': 'VISA' };
+    var html = '<div class="card-preview">' +
+      '<div style="display:flex;justify-content:space-between;align-items:flex-start;"><div class="brand">' + (brands[c.cardType] || 'VISA') + '</div>' +
+      '<div class="balance-display"><div class="balance-label">Balance</div><div class="balance-value">$' + (parseFloat(c.balance) || 0).toFixed(2) + '</div></div></div>' +
+      '<div class="number">' + (c.fullNumber || '•••• •••• •••• ••••') + '</div>' +
+      '<div style="display:flex;justify-content:space-between;align-items:flex-end;"><div class="holder">' + (c.cardHolderName || 'CARD HOLDER') + '</div><div class="expiry">' + (c.expDate || 'N/A') + '</div></div></div>' +
+      '<div class="modal-section">Card Details</div>' +
+      '<div class="modal-row"><span class="label">Email</span><span class="val">' + (c.email || '') + '</span></div>' +
+      '<div class="modal-row"><span class="label">Card Type</span><span class="val">' + (c.cardType || '') + '</span></div>' +
+      '<div class="modal-row"><span class="label">Card Number</span><span class="val" style="font-family:monospace;">' + (c.fullNumber || '') + '</span></div>' +
+      '<div class="modal-row"><span class="label">CVV</span><span class="val" style="font-family:monospace;">' + (c.cvv || '') + '</span></div>' +
+      '<div class="modal-row"><span class="label">Balance</span><span class="val" style="color:var(--accent);font-weight:700;">' + fmtMoney(c.balance) + '</span></div>' +
+      '<div class="modal-row"><span class="label">Status</span><span class="val"><span class="' + statusClass(c.frozen ? 'frozen' : 'active') + '">' + (c.frozen ? 'Frozen' : 'Active') + '</span></span></div>' +
+      '<div class="modal-row"><span class="label">Created</span><span class="val">' + fmtDate(c.createdAt) + '</span></div>';
+    if (c.billingAddress) html += '<div class="modal-row"><span class="label">Billing Address</span><span class="val">' + c.billingAddress + '</span></div>';
+    html += '<div style="margin-top:20px;display:flex;gap:8px;justify-content:flex-end;">' +
+      '<button class="action-btn btn-info" onclick="toggleCardFreezeAdmin(\'' + c.id + '\',' + (c.frozen ? 'false' : 'true') + ')" style="padding:8px 16px;">' + (c.frozen ? '🔥 Unfreeze' : '❄️ Freeze') + '</button>' +
+      '<button class="action-btn btn-delete" onclick="if(confirm(\'Delete this card?\'))deleteCardAdmin(\'' + c.id + '\')" style="padding:8px 16px;">🗑️ Delete</button></div>';
+    document.getElementById('cardModalBody').innerHTML = html;
+  } catch(e) { document.getElementById('cardModalBody').innerHTML = '<div class="empty" style="color:var(--danger);">Error: ' + e.message + '</div>'; }
 }
 
-// ====== PAGINATION ======
-function renderPagination(current, total, fn) {
-  if (total <= 1) return '';
-  var html = '<div class="pagination">';
-  html += '<button class="page-btn" ' + (current <= 1 ? 'disabled' : '') + ' onclick="' + fn + '(' + (current - 1) + ')">← Prev</button>';
-  var start = Math.max(1, current - 2);
-  var end = Math.min(total, current + 2);
-  for (var i = start; i <= end; i++) {
-    html += '<button class="page-btn ' + (i === current ? 'active' : '') + '" onclick="' + fn + '(' + i + ')">' + i + '</button>';
-  }
-  html += '<button class="page-btn" ' + (current >= total ? 'disabled' : '') + ' onclick="' + fn + '(' + (current + 1) + ')">Next →</button>';
-  html += '</div>';
-  return html;
+async function toggleCardFreezeAdmin(cardId, freeze) {
+  try { await apiPost('/api/admin/card/' + cardId + '/freeze', { frozen: freeze }); showToast(freeze ? 'Card frozen' : 'Card unfrozen', 'success'); closeModal('cardModal'); loadVirtualCards(); }
+  catch(e) { showToast(e.message, 'error'); }
+}
+async function deleteCardAdmin(cardId) {
+  try { await apiDelete('/api/admin/card/' + cardId); showToast('Card deleted', 'success'); closeModal('cardModal'); loadVirtualCards(); }
+  catch(e) { showToast(e.message, 'error'); }
 }
 
-// ====== AUTO-LOGIN CHECK ======
+// ====== GIFT CARDS — INSTANT ======
+var giftPage = 1;
+function loadGiftCards(page) {
+  if (page) giftPage = page;
+  var m = document.getElementById('mainContent');
+  m.innerHTML =
+    '<div class="quick-stats"><div class="quick-stat"><div class="qs-label">Total Gift Cards</div><div class="qs-value" id="gs0">—</div></div>' +
+    '<div class="quick-stat"><div class="qs-label">Total Value</div><div class="qs-value" id="gs1">—</div></div></div>' +
+    '<div class="table-wrap"><div class="table-header"><h2>Gift Cards (<span id="giftTot">—</span>)</h2></div>' +
+    '<div style="overflow-x:auto;"><table><thead><tr><th>Email</th><th>Type</th><th class="hide-mobile">Country</th><th>Recipient</th><th>Amount</th><th class="hide-mobile">Date</th></tr></thead>' +
+    '<tbody id="giftBody"></tbody></table></div><div id="giftPag"></div></div>';
+
+  api('/api/admin/giftcards?page=' + giftPage).then(function(d) {
+    var g = d.giftCards || [];
+    var tv = g.reduce(function(s, x) { return s + (parseFloat(x.amount) || 0); }, 0);
+    document.getElementById('giftTot').textContent = d.total || 0;
+    document.getElementById('gs0').textContent = d.total || 0;
+    document.getElementById('gs1').textContent = fmtMoney(tv);
+    var b = document.getElementById('giftBody');
+    if (!g.length) { b.innerHTML = '<tr><td colspan="6" class="empty"><i class="fas fa-gift"></i>No gift cards yet</td></tr>'; document.getElementById('giftPag').innerHTML = ''; return; }
+    b.innerHTML = g.map(function(x) {
+      return '<tr><td>' + (x.email || x.buyerEmail || '') + '</td><td>' + (x.cardType || x.name || '') + '</td>' +
+        '<td class="hide-mobile">' + (x.countryFlag || '') + ' ' + (x.countryName || '') + '</td>' +
+        '<td style="font-size:12px;">' + (x.recipientEmail || '') + '</td><td><strong>' + fmtMoney(x.amount) + '</strong></td>' +
+        '<td class="hide-mobile">' + fmtDate(x.createdAt || x.created_at) + '</td></tr>';
+    }).join('');
+    document.getElementById('giftPag').innerHTML = renderPagination(giftPage, d.pages || 1, 'loadGiftCards');
+  }).catch(function() { document.getElementById('giftBody').innerHTML = '<tr><td colspan="6" class="empty" style="color:var(--danger);">Failed to load</td></tr>'; });
+}
+
+// ====== REFERRALS — INSTANT ======
+function loadReferrals() {
+  var m = document.getElementById('mainContent');
+  m.innerHTML =
+    '<div class="table-wrap"><div class="table-header"><h2>🏆 Top Referrers (<span id="refTot">—</span>)</h2></div>' +
+    '<div style="overflow-x:auto;"><table><thead><tr><th>Rank</th><th>Email</th><th>Ref Code</th><th>Referrals</th><th class="hide-mobile">Spent by Referrals</th><th class="hide-mobile">Commission Earned</th><th>Actions</th></tr></thead>' +
+    '<tbody id="refBody"></tbody></table></div></div>';
+
+  api('/api/admin/referrals').then(function(d) {
+    var r = d.referrers || [];
+    document.getElementById('refTot').textContent = r.length;
+    var b = document.getElementById('refBody');
+    if (!r.length) { b.innerHTML = '<tr><td colspan="7" class="empty"><i class="fas fa-user-group"></i>No referral activity yet</td></tr>'; return; }
+    b.innerHTML = r.map(function(u, i) {
+      return '<tr><td><strong>#' + (i + 1) + '</strong></td><td><strong>' + u.email + '</strong></td>' +
+        '<td style="font-family:monospace;font-size:12px;color:var(--accent);">' + (u.referral_code || '') + '</td>' +
+        '<td><strong>' + (u.referral_count || 0) + '</strong></td>' +
+        '<td class="hide-mobile">' + fmtMoney(u.total_spent_by_referrals) + '</td>' +
+        '<td class="hide-mobile" style="color:var(--accent);font-weight:700;">' + fmtMoney(u.commission_earned) + '</td>' +
+        '<td><button class="action-btn btn-view" onclick="viewUser(\'' + u.email + '\')">View</button></td></tr>';
+    }).join('');
+  }).catch(function() { document.getElementById('refBody').innerHTML = '<tr><td colspan="7" class="empty" style="color:var(--danger);">Failed to load</td></tr>'; });
+}
+
+// ====== AUTO-LOGIN ======
 (function() {
   var saved = sessionStorage.getItem('admin_token');
   if (saved) {
