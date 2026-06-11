@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+ <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -218,8 +218,6 @@ tr:hover td { background:rgba(13,155,122,0.03); }
     <div class="nav-item" data-page="numbers" onclick="switchPage('numbers')"><i class="fas fa-phone"></i> SMS Activations</div>
     <div class="nav-section">Rent & Cards</div>
     <div class="nav-item" data-page="rentals" onclick="switchPage('rentals')"><i class="fas fa-calendar-alt"></i> Rent Numbers</div>
-    <div class="nav-item" data-page="virtualcards" onclick="switchPage('virtualcards')"><i class="fas fa-credit-card"></i> Virtual Cards</div>
-    <div class="nav-item" data-page="giftcards" onclick="switchPage('giftcards')"><i class="fas fa-gift"></i> Gift Cards</div>
     <div class="nav-section">System</div>
     <div class="nav-item" data-page="referrals" onclick="switchPage('referrals')"><i class="fas fa-user-group"></i> Referrals</div>
   </div>
@@ -574,8 +572,6 @@ function switchPage(page) {
     'deposits': loadDeposits,
     'numbers': loadNumbers,
     'rentals': loadRentals,
-    'virtualcards': loadVirtualCards,
-    'giftcards': loadGiftCards,
     'referrals': loadReferrals
   };
   if (loaders[page]) loaders[page]();
@@ -636,7 +632,6 @@ async function loadDashboard() {
       '<div class="stat-card green"><div class="label">Total Deposits</div><div class="value">' + escHTML(fmtMoney(s.totalDeposits)) + '</div><div class="sub">Today: ' + escHTML(fmtMoney(s.todayDeposits)) + '</div></div>' +
       '<div class="stat-card red"><div class="label">Pending Withdrawals</div><div class="value">' + escHTML(s.pendingWithdrawals || 0) + '</div><div class="sub">Needs attention</div></div>' +
       '<div class="stat-card blue"><div class="label">Active Rentals</div><div class="value">' + escHTML(s.activeRentals || 0) + '</div><div class="sub">Rented numbers</div></div>' +
-      '<div class="stat-card green"><div class="label">Virtual Cards</div><div class="value">' + escHTML(s.totalCards || 0) + '</div><div class="sub">Created cards</div></div>' +
       '<div class="stat-card green"><div class="label">Referral Commissions</div><div class="value">' + escHTML(fmtMoney(s.totalCommissions)) + '</div><div class="sub">' + escHTML(s.totalReferrals || 0) + ' total referrals</div></div>' +
     '</div>';
 
@@ -979,183 +974,243 @@ async function loadRentals(page, status) {
   }
 }
 
+// ====== IMPROVED: viewRentalDetail with proper error handling ======
 async function viewRentalDetail(rentalId) {
-  document.getElementById('rentalModalTitle').textContent = 'Rental Detail: ' + rentalId;
+  document.getElementById('rentalModalTitle').textContent = 'Rental Detail #' + rentalId;
   document.getElementById('rentalModalBody').innerHTML = loadingHTML();
   document.getElementById('rentalModal').classList.add('show');
 
   try {
-    var data = await api('/api/admin/rental/' + rentalId, false);
-    if (data === null) return;
+    // Use a separate controller for this request so it doesn't get aborted
+    var detailController = new AbortController();
+    
+    debugLog('Fetching rental detail for ID: ' + rentalId, 'info');
+    
+    var res = await fetch('/api/admin/rental/' + rentalId, {
+      method: 'GET',
+      headers: { 'Authorization': token },
+      signal: detailController.signal
+    });
+
+    if (res.status === 401) {
+      doLogout();
+      throw new Error('Unauthorized');
+    }
+
+    if (res.status === 404) {
+      document.getElementById('rentalModalBody').innerHTML = 
+        '<div class="error-box"><i class="fas fa-exclamation-triangle"></i>' +
+        '<h3>Rental Not Found</h3>' +
+        '<p>The rental with ID "' + escHTML(rentalId) + '" was not found in the database.</p>' +
+        '<p style="font-size:12px;color:var(--text2);margin-top:8px;">It may have been deleted or the ID may be incorrect.</p></div>';
+      return;
+    }
+
+    var text = await res.text();
+    var data;
+    try {
+      data = JSON.parse(text);
+    } catch(e) {
+      throw new Error('Invalid JSON response from server');
+    }
+
+    if (data.error) {
+      throw new Error(data.error);
+    }
+
     var r = data.rental || data;
     var smsList = r.sms || [];
 
     var html = '<div class="modal-section">Rental Info</div>' +
-      '<div class="modal-row"><span class="label">Phone</span><span class="val" style="font-family:monospace;font-size:16px;font-weight:700;">' + escHTML(r.phone || '') + '</span></div>' +
-      '<div class="modal-row"><span class="label">Email</span><span class="val">' + escHTML(r.email || '') + '</span></div>' +
-      '<div class="modal-row"><span class="label">Country</span><span class="val">' + escHTML(r.countryFlag || '') + ' ' + escHTML(r.countryName || '') + '</span></div>' +
-      '<div class="modal-row"><span class="label">Plan</span><span class="val">' + escHTML(r.planName || '') + '</span></div>' +
-      '<div class="modal-row"><span class="label">Cost</span><span class="val" style="color:var(--accent);font-weight:700;">' + escHTML(fmtMoney(r.cost)) + '</span></div>' +
+      '<div class="modal-row"><span class="label">Database ID</span><span class="val" style="font-family:monospace;font-size:12px;">' + escHTML(r.id || rentalId) + '</span></div>' +
+      (r.rentId ? '<div class="modal-row"><span class="label">Provider Rental ID</span><span class="val" style="font-family:monospace;font-size:11px;">' + escHTML(r.rentId) + '</span></div>' : '') +
+      '<div class="modal-row"><span class="label">Phone</span><span class="val" style="font-family:monospace;font-size:16px;font-weight:700;">' + escHTML(r.phone || 'N/A') + '</span></div>' +
+      '<div class="modal-row"><span class="label">Email</span><span class="val">' + escHTML(r.email || 'N/A') + '</span></div>' +
+      '<div class="modal-row"><span class="label">Country</span><span class="val">' + escHTML((r.countryFlag || '') + ' ' + (r.countryName || 'N/A')) + '</span></div>' +
+      '<div class="modal-row"><span class="label">Plan</span><span class="val">' + escHTML(r.planName || 'N/A') + '</span></div>' +
+      '<div class="modal-row"><span class="label">Duration</span><span class="val">' + escHTML((r.durationMonths || 1) + ' month(s)') + '</span></div>' +
+      '<div class="modal-row"><span class="label">Provider Cost</span><span class="val">' + escHTML(fmtMoney(r.providerCost || 0)) + '</span></div>' +
+      '<div class="modal-row"><span class="label">User Cost</span><span class="val" style="color:var(--accent);font-weight:700;">' + escHTML(fmtMoney(r.cost)) + '</span></div>' +
       '<div class="modal-row"><span class="label">Status</span><span class="val"><span class="' + statusClass(r.status) + '">' + escHTML(r.status || 'active') + '</span></span></div>' +
       '<div class="modal-row"><span class="label">Created</span><span class="val">' + escHTML(fmtDate(r.createdAt)) + '</span></div>' +
-      '<div class="modal-row"><span class="label">Expires</span><span class="val">' + escHTML(fmtDate(r.expiresAt)) + '</span></div>';
+      '<div class="modal-row"><span class="label">Expires</span><span class="val">' + escHTML(fmtDate(r.expiresAt)) + '</span></div>' +
+      (r.smsFetchId ? '<div class="modal-row"><span class="label">SMS Fetch ID</span><span class="val" style="font-family:monospace;font-size:11px;">' + escHTML(r.smsFetchId) + '</span></div>' : '');
 
     html += '<div class="modal-section">SMS Messages (' + smsList.length + ')</div>';
-    if (smsList.length === 0) html += '<div style="color:var(--text2);font-size:13px;padding:8px 0;">No SMS received yet</div>';
-    else for (var i = 0; i < smsList.length; i++) {
-      html += '<div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:8px;"><div style="display:flex;justify-content:space-between;margin-bottom:6px;"><span style="font-size:11px;font-weight:700;color:var(--accent);">FROM: ' + escHTML(smsList[i].sender || 'Unknown') + '</span><span style="font-size:11px;color:var(--text2);">' + escHTML(fmtDate(smsList[i].receivedAt)) + '</span></div><div style="font-size:13px;word-break:break-all;">' + escHTML(smsList[i].text || '') + '</div></div>';
-    }
-
-    html += '<div style="margin-top:20px;text-align:right;"><button class="action-btn btn-delete" onclick="if(confirm(\'Cancel this rental?\'))cancelRentalAdmin(\'' + escAttr(rentalId) + '\')" style="padding:8px 16px;"><i class="fas fa-ban"></i> Cancel Rental</button></div>';
-    document.getElementById('rentalModalBody').innerHTML = html;
-  } catch(e) {
-    if (e.name === 'AbortError') return;
-    document.getElementById('rentalModalBody').innerHTML = errorHTML('Could not load rental details.', e.message, "viewRentalDetail('" + escAttr(rentalId) + "')");
-  }
-}
-
-async function cancelRentalAdmin(rentalId) {
-  try {
-    await apiPost('/api/admin/rental/' + rentalId + '/cancel', {});
-    showToast('Rental cancelled', 'success');
-    closeModal('rentalModal');
-    loadRentals();
-  } catch(e) { showToast(e.message, 'error'); }
-}
-
-// ====== VIRTUAL CARDS ======
-var cardPage = 1;
-var cardFilter = '';
-
-async function loadVirtualCards(page, filter) {
-  if (page) cardPage = page;
-  if (filter !== undefined) { cardFilter = filter; cardPage = 1; }
-  var main = document.getElementById('mainContent');
-  main.innerHTML = loadingHTML();
-
-  try {
-    var q = cardFilter ? '&filter=' + cardFilter : '';
-    var data = await api('/api/admin/cards?page=' + cardPage + q, true);
-    if (data === null) return;
-    var cards = data.cards || [];
-    var totalBalance = 0, activeCards = 0, frozenCards = 0;
-    for (var i = 0; i < cards.length; i++) {
-      totalBalance += parseFloat(cards[i].balance) || 0;
-      if (cards[i].frozen) frozenCards++; else activeCards++;
-    }
-
-    var html = '<div class="quick-stats"><div class="quick-stat"><div class="qs-label">Total Cards</div><div class="qs-value">' + escHTML(data.total || 0) + '</div></div><div class="quick-stat"><div class="qs-label">Active</div><div class="qs-value" style="color:var(--accent);">' + escHTML(activeCards) + '</div></div><div class="quick-stat"><div class="qs-label">Frozen</div><div class="qs-value" style="color:var(--info);">' + escHTML(frozenCards) + '</div></div><div class="quick-stat"><div class="qs-label">Total Balance</div><div class="qs-value">' + escHTML(fmtMoney(totalBalance)) + '</div></div></div>';
-
-    html += '<div class="table-wrap"><div class="table-header"><h2><i class="fas fa-credit-card"></i> Virtual Cards (' + escHTML(data.total || 0) + ')</h2><div class="table-filters">' +
-      '<button class="filter-btn ' + (cardFilter === '' ? 'active' : '') + '" onclick="loadVirtualCards(1,\'\')">All</button>' +
-      '<button class="filter-btn ' + (cardFilter === 'active' ? 'active' : '') + '" onclick="loadVirtualCards(1,\'active\')">Active</button>' +
-      '<button class="filter-btn ' + (cardFilter === 'frozen' ? 'active' : '') + '" onclick="loadVirtualCards(1,\'frozen\')">Frozen</button></div></div>' +
-      '<div style="overflow-x:auto;"><table><thead><tr><th>Email</th><th>Type</th><th class="hide-mobile">Card Number</th><th class="hide-mobile">CVV</th><th class="hide-mobile">Expiry</th><th>Balance</th><th>Status</th><th class="hide-mobile">Created</th><th>Actions</th></tr></thead><tbody>';
-
-    for (var j = 0; j < cards.length; j++) {
-      var c = cards[j];
-      var maskedNum = c.fullNumber ? c.fullNumber.replace(/\d(?=.{4})/g, '•') : '—';
-      html += '<tr><td>' + escHTML(c.email) + '</td><td>' + escHTML(c.cardType || 'visa-basic') + '</td><td class="hide-mobile" style="font-family:monospace;">' + escHTML(maskedNum) + '</td><td class="hide-mobile" style="font-family:monospace;">' + escHTML(c.cvv || '***') + '</td><td class="hide-mobile">' + escHTML(c.expDate || '—') + '</td><td><strong>' + escHTML(fmtMoney(c.balance)) + '</strong></td><td><span class="' + statusClass(c.frozen ? 'frozen' : 'active') + '">' + escHTML(c.frozen ? 'Frozen' : 'Active') + '</span></td><td class="hide-mobile">' + escHTML(fmtDate(c.createdAt)) + '</td><td><button class="action-btn btn-view" onclick="viewCardDetail(\'' + escAttr(c.id) + '\')"><i class="fas fa-eye"></i></button></td></tr>';
-    }
-
-    html += '</tbody></table></div>' + renderPagination(cardPage, data.pages || 1, 'loadVirtualCards') + '</div>';
-    main.innerHTML = html;
-  } catch(e) {
-    if (e.name === 'AbortError') return;
-    main.innerHTML = errorHTML('Could not load cards.', e.message, 'loadVirtualCards()');
-  }
-}
-
-async function viewCardDetail(cardId) {
-  document.getElementById('cardModalTitle').textContent = 'Card Detail';
-  document.getElementById('cardModalBody').innerHTML = loadingHTML();
-  document.getElementById('cardModal').classList.add('show');
-
-  try {
-    var data = await api('/api/admin/card/' + cardId, false);
-    if (data === null) return;
-    var c = data.card || data;
-    var gradients = { 'visa-basic': 'linear-gradient(135deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%)', 'mastercard-standard': 'linear-gradient(135deg,#1a1a2e 0%,#2d1b3d 50%,#4a1942 100%)', 'visa-premium': 'linear-gradient(135deg,#0d0d0d 0%,#1a1a2e 50%,#162447 100%)' };
-    var brands = { 'visa-basic': 'VISA', 'mastercard-standard': 'MC', 'visa-premium': 'VISA' };
-
-    var html = '<div class="card-preview" style="background:' + (gradients[c.cardType] || gradients['visa-basic']) + ';">' +
-      '<div style="display:flex;justify-content:space-between;align-items:flex-start;"><div class="brand">' + escHTML(brands[c.cardType] || 'VISA') + '</div><div class="balance-display"><div class="balance-label">Balance</div><div class="balance-value">$' + (parseFloat(c.balance) || 0).toFixed(2) + '</div></div></div>' +
-      '<div class="number">' + escHTML(c.fullNumber || '•••• •••• •••• ••••') + '</div>' +
-      '<div style="display:flex;justify-content:space-between;align-items:flex-end;"><div class="holder">' + escHTML(c.cardHolderName || 'CARD HOLDER') + '</div><div class="expiry">' + escHTML(c.expDate || 'N/A') + '</div></div></div>';
-
-    html += '<div class="modal-section">Card Details</div>' +
-      '<div class="modal-row"><span class="label">Email</span><span class="val">' + escHTML(c.email || '') + '</span></div>' +
-      '<div class="modal-row"><span class="label">Card Type</span><span class="val">' + escHTML(c.cardType || '') + '</span></div>' +
-      '<div class="modal-row"><span class="label">Card Number</span><span class="val" style="font-family:monospace;">' + escHTML(c.fullNumber || '') + '</span></div>' +
-      '<div class="modal-row"><span class="label">CVV</span><span class="val" style="font-family:monospace;">' + escHTML(c.cvv || '') + '</span></div>' +
-      '<div class="modal-row"><span class="label">Balance</span><span class="val" style="color:var(--accent);font-weight:700;">' + escHTML(fmtMoney(c.balance)) + '</span></div>' +
-      '<div class="modal-row"><span class="label">Status</span><span class="val"><span class="' + statusClass(c.frozen ? 'frozen' : 'active') + '">' + escHTML(c.frozen ? 'Frozen' : 'Active') + '</span></span></div>' +
-      '<div class="modal-row"><span class="label">Created</span><span class="val">' + escHTML(fmtDate(c.createdAt)) + '</span></div>';
-    if (c.billingAddress) html += '<div class="modal-row"><span class="label">Billing Address</span><span class="val">' + escHTML(c.billingAddress) + '</span></div>';
-
-    html += '<div style="margin-top:20px;display:flex;gap:8px;justify-content:flex-end;">' +
-      '<button class="action-btn btn-info" onclick="toggleCardFreezeAdmin(\'' + escAttr(c.id) + '\',' + (c.frozen ? 'false' : 'true') + ')" style="padding:8px 16px;">' + (c.frozen ? '<i class="fas fa-fire"></i> Unfreeze' : '<i class="fas fa-snowflake"></i> Freeze') + '</button>' +
-      '<button class="action-btn btn-delete" onclick="if(confirm(\'Delete this card?\'))deleteCardAdmin(\'' + escAttr(c.id) + '\')" style="padding:8px 16px;"><i class="fas fa-trash"></i> Delete</button></div>';
-
-    document.getElementById('cardModalBody').innerHTML = html;
-  } catch(e) {
-    if (e.name === 'AbortError') return;
-    document.getElementById('cardModalBody').innerHTML = errorHTML('Could not load card details.', e.message, "viewCardDetail('" + escAttr(cardId) + "')");
-  }
-}
-
-async function toggleCardFreezeAdmin(cardId, freeze) {
-  try {
-    await apiPost('/api/admin/card/' + cardId + '/freeze', { frozen: freeze });
-    showToast(freeze ? 'Card frozen' : 'Card unfrozen', 'success');
-    closeModal('cardModal');
-    loadVirtualCards();
-  } catch(e) { showToast(e.message, 'error'); }
-}
-
-async function deleteCardAdmin(cardId) {
-  try {
-    await apiDelete('/api/admin/card/' + cardId);
-    showToast('Card deleted', 'success');
-    closeModal('cardModal');
-    loadVirtualCards();
-  } catch(e) { showToast(e.message, 'error'); }
-}
-
-// ====== GIFT CARDS ======
-var giftPage = 1;
-
-async function loadGiftCards(page) {
-  if (page) giftPage = page;
-  var main = document.getElementById('mainContent');
-  main.innerHTML = loadingHTML();
-
-  try {
-    var data = await api('/api/admin/giftcards?page=' + giftPage, true);
-    if (data === null) return;
-    var giftCards = data.giftCards || [];
-    var totalValue = 0;
-    for (var i = 0; i < giftCards.length; i++) totalValue += parseFloat(giftCards[i].amount) || 0;
-
-    var html = '<div class="quick-stats"><div class="quick-stat"><div class="qs-label">Total Gift Cards</div><div class="qs-value">' + escHTML(data.total || 0) + '</div></div><div class="quick-stat"><div class="qs-label">Total Value</div><div class="qs-value">' + escHTML(fmtMoney(totalValue)) + '</div></div></div>';
-    html += '<div class="table-wrap"><div class="table-header"><h2><i class="fas fa-gift"></i> Gift Cards (' + escHTML(data.total || 0) + ')</h2></div>';
-
-    if (giftCards.length === 0) {
-      html += '<div class="empty"><i class="fas fa-gift"></i>No gift cards purchased yet</div>';
+    if (smsList.length === 0) {
+      html += '<div style="color:var(--text2);font-size:13px;padding:8px 0;">No SMS received yet</div>';
     } else {
-      html += '<div style="overflow-x:auto;"><table><thead><tr><th>Email</th><th>Card Type</th><th class="hide-mobile">Country</th><th>Recipient</th><th>Amount</th><th class="hide-mobile">Status</th><th class="hide-mobile">Date</th></tr></thead><tbody>';
-      for (var j = 0; j < giftCards.length; j++) {
-        var g = giftCards[j];
-        html += '<tr><td>' + escHTML(g.email || g.buyerEmail || '') + '</td><td>' + escHTML(g.cardType || g.name || '') + '</td><td class="hide-mobile">' + escHTML(g.countryFlag || '') + ' ' + escHTML(g.countryName || '') + '</td><td style="font-size:12px;">' + escHTML(g.recipientEmail || '') + '</td><td><strong>' + escHTML(fmtMoney(g.amount)) + '</strong></td><td class="hide-mobile"><span class="status status-completed">Sent</span></td><td class="hide-mobile">' + escHTML(fmtDate(g.createdAt || g.created_at)) + '</td></tr>';
+      for (var i = 0; i < smsList.length; i++) {
+        var sms = smsList[i];
+        var sender = sms.sender || sms.from || 'Unknown';
+        var content = sms.text || sms.content || sms.body || '';
+        var receivedAt = sms.receivedAt || sms.receive_at || sms.created_at || '';
+        
+        html += '<div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:8px;">' +
+          '<div style="display:flex;justify-content:space-between;margin-bottom:6px;">' +
+          '<span style="font-size:11px;font-weight:700;color:var(--accent);">FROM: ' + escHTML(sender) + '</span>' +
+          '<span style="font-size:11px;color:var(--text2);">' + escHTML(fmtDate(receivedAt)) + '</span>' +
+          '</div>' +
+          '<div style="font-size:13px;word-break:break-all;line-height:1.5;">' + escHTML(content) + '</div>' +
+          '</div>';
       }
-      html += '</tbody></table></div>';
     }
 
-    html += renderPagination(giftPage, data.pages || 1, 'loadGiftCards') + '</div>';
-    main.innerHTML = html;
+    html += '<div style="margin-top:20px;text-align:right;">' +
+      '<button class="action-btn btn-delete" onclick="if(confirm(\'Cancel this rental? This will refund the user.\'))cancelRentalAdmin(\'' + escAttr(rentalId) + '\')" style="padding:8px 16px;"><i class="fas fa-ban"></i> Cancel Rental</button>' +
+      '</div>';
+      
+    document.getElementById('rentalModalBody').innerHTML = html;
+    debugLog('Rental detail loaded successfully', 'success');
+    
   } catch(e) {
-    if (e.name === 'AbortError') return;
-    main.innerHTML = errorHTML('Could not load gift cards.', e.message, 'loadGiftCards()');
+    if (e.name === 'AbortError') {
+      document.getElementById('rentalModalBody').innerHTML = 
+        '<div class="error-box"><i class="fas fa-info-circle" style="color:var(--info);"></i>' +
+        '<h3>Request Cancelled</h3>' +
+        '<p>The request was cancelled. Please try again.</p>' +
+        '<button class="retry-btn" onclick="viewRentalDetail(\'' + escAttr(rentalId) + '\')"><i class="fas fa-redo"></i> Retry</button></div>';
+      return;
+    }
+    
+    console.error('viewRentalDetail error:', e);
+    debugLog('viewRentalDetail error: ' + e.message, 'error');
+    document.getElementById('rentalModalBody').innerHTML = 
+      '<div class="error-box"><i class="fas fa-exclamation-triangle"></i>' +
+      '<h3>Failed to Load</h3>' +
+      '<p>' + escHTML(e.message) + '</p>' +
+      '<button class="retry-btn" onclick="viewRentalDetail(\'' + escAttr(rentalId) + '\')"><i class="fas fa-redo"></i> Retry</button></div>';
+  }
+}
+
+// Make sure statusClass handles all rental statuses
+function statusClass(s) { 
+  s = (s || 'pending').toLowerCase();
+  var map = {
+    'pending': 'status-pending',
+    'completed': 'status-completed',
+    'success': 'status-success',
+    'failed': 'status-failed',
+    'rejected': 'status-rejected',
+    'waiting': 'status-waiting',
+    'received': 'status-received',
+    'expired': 'status-expired',
+    'active': 'status-active',
+    'cancelled': 'status-cancelled',
+    'frozen': 'status-frozen'
+  };
+  return 'status ' + (map[s] || 'status-pending');
+}
+
+
+// ====== IMPROVED: viewUser with proper error handling ======
+async function viewUser(email) {
+  document.getElementById('modalTitle').textContent = 'User: ' + email;
+  document.getElementById('modalBody').innerHTML = loadingHTML();
+  document.getElementById('userModal').classList.add('show');
+
+  try {
+    // Use a separate controller for this request
+    var userController = new AbortController();
+    
+    var res = await fetch('/api/admin/user/' + encodeURIComponent(email), {
+      method: 'GET',
+      headers: { 'Authorization': token },
+      signal: userController.signal
+    });
+
+    if (res.status === 401) {
+      doLogout();
+      throw new Error('Unauthorized');
+    }
+
+    if (res.status === 404) {
+      document.getElementById('modalBody').innerHTML = 
+        '<div class="error-box"><i class="fas fa-exclamation-triangle"></i>' +
+        '<h3>User Not Found</h3>' +
+        '<p>No user found with email: ' + escHTML(email) + '</p></div>';
+      return;
+    }
+
+    var text = await res.text();
+    var data;
+    try {
+      data = JSON.parse(text);
+    } catch(e) {
+      throw new Error('Invalid JSON response from server');
+    }
+
+    if (data.error) {
+      throw new Error(data.error);
+    }
+
+    var u = data.user || {};
+    var nums = data.numbers || [];
+    var rents = data.rentals || [];
+    var cards = data.cards || [];
+    var refs = data.referred_users || [];
+
+    var h = '<div class="modal-section">Account Info</div>' +
+      '<div class="modal-row"><span class="label">Email</span><span class="val">' + escHTML(u.email) + '</span></div>' +
+      '<div class="modal-row"><span class="label">Balance</span><span class="val" style="color:var(--accent);font-size:18px;">' + escHTML(fmtMoney(u.balance)) + '</span></div>' +
+      '<div class="modal-row"><span class="label">Referral Code</span><span class="val" style="font-family:monospace;">' + escHTML(u.referral_code || 'None') + '</span></div>' +
+      '<div class="modal-row"><span class="label">Referred By</span><span class="val">' + escHTML(u.referred_by || 'None') + '</span></div>' +
+      '<div class="modal-row"><span class="label">Joined</span><span class="val">' + escHTML(fmtDate(u.created_at)) + '</span></div>';
+
+    var nums = data.numbers || [];
+    h += '<div class="modal-section">SMS Numbers (' + nums.length + ')</div>';
+    if (nums.length === 0) h += '<div style="color:var(--text2);font-size:13px;padding:8px 0;">No numbers</div>';
+    else for (var i = 0; i < Math.min(nums.length, 10); i++) {
+      h += '<div class="modal-row"><span class="label">' + escHTML(nums[i].service_name || '') + ' — ' + escHTML(nums[i].phone) + '</span><span class="val"><span class="' + statusClass(nums[i].status) + '">' + escHTML(nums[i].status) + '</span> ' + escHTML(fmtMoney(nums[i].cost)) + '</span></div>';
+    }
+
+    var rents = data.rentals || [];
+    h += '<div class="modal-section">Rentals (' + rents.length + ')</div>';
+    if (rents.length === 0) h += '<div style="color:var(--text2);font-size:13px;padding:8px 0;">No rentals</div>';
+    else for (var j = 0; j < Math.min(rents.length, 10); j++) {
+      var rentSms = [];
+      if (rents[j].sms) {
+        try { rentSms = typeof rents[j].sms === 'string' ? JSON.parse(rents[j].sms) : rents[j].sms; } catch(e) {}
+      }
+      h += '<div class="modal-row"><span class="label">' + escHTML(rents[j].phone || '') + ' (' + escHTML(rents[j].planName || '') + ')</span><span class="val"><span class="' + statusClass(rents[j].status) + '">' + escHTML(rents[j].status || 'active') + '</span> ' + escHTML(fmtMoney(rents[j].cost)) + ' <span style="font-size:10px;color:var(--text2);">(' + rentSms.length + ' SMS)</span></span></div>';
+    }
+
+    var cards = data.cards || [];
+    h += '<div class="modal-section">Virtual Cards (' + cards.length + ')</div>';
+    if (cards.length === 0) h += '<div style="color:var(--text2);font-size:13px;padding:8px 0;">No cards</div>';
+    else for (var k = 0; k < Math.min(cards.length, 10); k++) {
+      var maskedNum = cards[k].fullNumber ? cards[k].fullNumber.replace(/\d(?=.{4})/g, '•') : '—';
+      h += '<div class="modal-row"><span class="label">' + escHTML(cards[k].cardType || '') + ' — ' + escHTML(maskedNum) + '</span><span class="val">' + escHTML(fmtMoney(cards[k].balance)) + ' <span class="' + statusClass(cards[k].frozen ? 'frozen' : 'active') + '">' + escHTML(cards[k].frozen ? 'Frozen' : 'Active') + '</span></span></div>';
+    }
+
+    var refs = data.referred_users || [];
+    h += '<div class="modal-section">Referred Users (' + refs.length + ')</div>';
+    if (refs.length === 0) h += '<div style="color:var(--text2);font-size:13px;padding:8px 0;">No referrals</div>';
+    else for (var m = 0; m < refs.length; m++) {
+      h += '<div class="modal-row"><span class="label">' + escHTML(refs[m].email) + '</span><span class="val">' + escHTML(fmtDate(refs[m].created_at)) + '</span></div>';
+    }
+
+    h += '<div style="margin-top:20px;display:flex;gap:8px;justify-content:flex-end;">' +
+      '<button class="action-btn btn-add" onclick="openBalanceModal(\'' + escAttr(email) + '\',' + u.balance + ')" style="padding:8px 16px;"><i class="fas fa-dollar-sign"></i> Adjust Balance</button>' +
+      '<button class="action-btn btn-delete" onclick="if(confirm(\'Delete this user permanently?\'))deleteUser(\'' + escAttr(email) + '\')" style="padding:8px 16px;"><i class="fas fa-trash"></i> Delete User</button></div>';
+
+    document.getElementById('modalBody').innerHTML = h;
+  } catch(e) {
+    if (e.name === 'AbortError') {
+      document.getElementById('modalBody').innerHTML = 
+        '<div class="error-box"><i class="fas fa-info-circle" style="color:var(--info);"></i>' +
+        '<h3>Request Cancelled</h3>' +
+        '<p>Please try again.</p>' +
+        '<button class="retry-btn" onclick="viewUser(\'' + escAttr(email) + '\')"><i class="fas fa-redo"></i> Retry</button></div>';
+      return;
+    }
+    
+    console.error('viewUser error:', e);
+    document.getElementById('modalBody').innerHTML = 
+      '<div class="error-box"><i class="fas fa-exclamation-triangle"></i>' +
+      '<h3>Failed to Load</h3>' +
+      '<p>' + escHTML(e.message) + '</p>' +
+      '<button class="retry-btn" onclick="viewUser(\'' + escAttr(email) + '\')"><i class="fas fa-redo"></i> Retry</button></div>';
   }
 }
 
@@ -1225,3 +1280,4 @@ document.addEventListener('keydown', function(e) {
 </script>
 </body>
 </html>
+

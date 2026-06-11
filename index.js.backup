@@ -1805,6 +1805,26 @@ app.get('/api/v2/rent/test', function(req, res) {
 
 
 // ====================================================================
+// ====== ROUTE DIAGNOSTIC (REMOVE AFTER DEBUGGING) ======
+// ====================================================================
+
+// List all registered API routes
+console.log('\n=== REGISTERED API ROUTES ===');
+app._router.stack.forEach(function(middleware) {
+  if (middleware.route) {
+    var methods = Object.keys(middleware.route.methods).join(',').toUpperCase();
+    console.log(methods + ' ' + middleware.route.path);
+  } else if (middleware.name === 'router') {
+    middleware.handle.stack.forEach(function(handler) {
+      if (handler.route) {
+        var methods = Object.keys(handler.route.methods).join(',').toUpperCase();
+        console.log(methods + ' ' + handler.route.path);
+      }
+    });
+  }
+});
+console.log('=== END ROUTE LIST ===\n');
+
 
 // ====================================================================
 // ====== ADMIN: ALL RENTALS ======
@@ -1997,6 +2017,26 @@ async function loadProviderMaps() {
     console.log('✅ Provider maps loaded');
   } catch (err) { console.error('Provider maps error:', err.message); }
 }
+
+// ====================================================================
+// ====== ROUTE DIAGNOSTIC ======
+// ====================================================================
+console.log('\n========== REGISTERED ROUTES ==========');
+app._router.stack.forEach(function(layer) {
+  if (layer.route) {
+    var methods = Object.keys(layer.route.methods).join(',').toUpperCase();
+    console.log(methods + ' ' + layer.route.path);
+  } else if (layer.name === 'router' && layer.handle.stack) {
+    layer.handle.stack.forEach(function(handler) {
+      if (handler.route) {
+        var methods = Object.keys(handler.route.methods).join(',').toUpperCase();
+        console.log(methods + ' ' + handler.route.path);
+      }
+    });
+  }
+});
+console.log('======================================\n');
+
 // ====================================================================
 // ====== CATCH-ALL - ABSOLUTELY LAST MIDDLEWARE ======
 // ====================================================================

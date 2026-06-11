@@ -1,3 +1,24 @@
+// This must be BEFORE renderMainContent because renderMainContent uses 'render' + 'Page' pattern
+
+// ===== RENT PAGE - TOP LEVEL FUNCTION (ADD TO TOP OF page.js, before renderMainContent) =====
+function renderRentPage(main) {
+  // Check if page-extra.js has the real function
+  if (typeof window.renderRentPage === 'function') {
+    return window.renderRentPageContent(main);
+  }
+  
+  // Otherwise, show loading state and try again shortly after
+  console.log('⚠️ renderRentPage not found in global scope, trying to load page-extra.js...');
+  
+  setTimeout(function() {
+    if (typeof window.renderRentPage === 'function') {
+      window.renderRentPageContent(main);
+    } else {
+      console.warn('⚠️ page-extra.js still not loaded after delay');
+    }
+  }, 300);
+}
+
 // ===== FORCE BALANCE FIX - MUST BE FIRST LINE =====
 (function() {
   var email = null;
@@ -15,10 +36,8 @@
       return;
     }
     
-    // Got email - load and cache balance
     clearInterval(checker);
     
-    // Show cached balance IMMEDIATELY
     var cached = localStorage.getItem('cachedBalance_' + email);
     if (cached && parseFloat(cached) > 0) {
       window.balance = parseFloat(cached);
@@ -30,7 +49,6 @@
       });
     }
     
-    // Then fetch fresh from server
     fetch('/api/user/' + email)
       .then(function(r) { return r.json(); })
       .then(function(data) {
@@ -52,7 +70,6 @@
 window.showInsufficientBalanceWarning = function(requiredAmount, knownBalance) {
   var currentBalance = knownBalance;
   
-  // Only fall back to DOM if no balance passed
   if (currentBalance === undefined || currentBalance === null) {
     currentBalance = 0;
     var balanceEl = document.querySelector('.balance-amount') || 
@@ -63,7 +80,6 @@ window.showInsufficientBalanceWarning = function(requiredAmount, knownBalance) {
     }
   }
   
-  // Extra safety: try all possible balance selectors
   if (currentBalance <= 0) {
     var selectors = [
       '.balance-amount', '#balanceDisplay', '#userBalance',
@@ -110,7 +126,6 @@ window.showInsufficientBalanceWarning = function(requiredAmount, knownBalance) {
       '</div>' +
     '</div>';
   
-  // Remove any existing overlay first
   var existing = document.getElementById('insufficientBalanceOverlay');
   if (existing) existing.remove();
   
@@ -129,7 +144,6 @@ window.checkAndShowLowBalance = function() {
   var badge = document.getElementById('lowBalanceIndicator');
   
   if (balance < 1) {
-    // Very low balance - show warning
     if (!badge) {
       badge = document.createElement('span');
       badge.id = 'lowBalanceIndicator';
@@ -138,7 +152,6 @@ window.checkAndShowLowBalance = function() {
     }
     badge.style.background = 'var(--danger)';
   } else if (balance < 5) {
-    // Low balance - show warning
     if (!badge) {
       badge = document.createElement('span');
       badge.id = 'lowBalanceIndicator';
@@ -147,7 +160,6 @@ window.checkAndShowLowBalance = function() {
     }
     badge.style.background = 'var(--warning)';
   } else {
-    // Sufficient balance - remove indicator
     if (badge) {
       badge.remove();
     }
@@ -160,7 +172,6 @@ window.updateBalanceDisplay = function(newBalance) {
   var balance = parseFloat(newBalance) || 0;
   window.balance = balance;
   
-  // Update all possible balance elements immediately
   var selectors = [
     '.balance-amount', '#balanceDisplay', '#userBalance',
     '#depositCurrentBalance', '.nav-balance', '#navBalance',
@@ -174,15 +185,12 @@ window.updateBalanceDisplay = function(newBalance) {
     });
   });
   
-  // Cache in localStorage for instant display on next page load
   var email = (typeof getUserEmail === 'function') ? getUserEmail() : '';
   if (email) {
     localStorage.setItem('cachedBalance_' + email, balance.toString());
-    // Also fire storage event for other tabs
     try { localStorage.setItem('userBalance', balance.toString()); } catch(e) {}
   }
   
-  // Check and show low balance indicator
   setTimeout(function() {
     window.checkAndShowLowBalance();
   }, 100);
@@ -229,8 +237,6 @@ function maskEmail(email) {
 }
 
 // ===== MISSING HELPER FUNCTIONS =====
-
-// Safe get user email
 window.getUserEmail = function() {
   try {
     return localStorage.getItem('sonverify_email') || 
@@ -241,7 +247,6 @@ window.getUserEmail = function() {
   }
 };
 
-// Copy number to clipboard
 window.copyNumber = function(phone) {
   var cleaned = phone.replace(/[^\d+\s-]/g, '');
   if (navigator.clipboard) {
@@ -273,20 +278,16 @@ function fallbackCopy(text) {
 window.cancelNumber = function(id) {
   if (!confirm('Cancel this number and get a refund?')) return;
   
-  var btn = event ? event.target : null;
+  var btn = window.event ? window.event.target : null;
   if (btn) { btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>'; btn.disabled = true; }
   
-  // First cancel on SMS-Bus
   smsbusCancelActivation(id)
     .then(function(cancelData) {
       console.log('SMS-Bus cancel result:', cancelData);
-      
-      // FIX: Call cancel endpoint instead of DELETE - this sets status to 'cancelled' in history
       return fetch('/api/numbers/' + id + '/cancel', { method: 'POST' })
         .then(function(res) { return res.json(); });
     })
     .catch(function(err) {
-      // If SMS-Bus cancel fails, still try to cancel locally
       console.warn('SMS-Bus cancel failed, cancelling locally:', err.message);
       return fetch('/api/numbers/' + id + '/cancel', { method: 'POST' })
         .then(function(res) { return res.json(); });
@@ -306,22 +307,17 @@ window.cancelNumber = function(id) {
         if (typeof loadBalance === 'function') loadBalance();
       }
       
-      // Remove from active numbers immediately
       window.activeNumbers = window.activeNumbers.filter(function(n) { return n.id != id; });
       if (typeof renderMainContent === 'function') renderMainContent();
       
-      // Also load history so cancelled item appears there
       if (typeof loadUnifiedHistory === 'function') {
-      loadUnifiedHistory().catch(function() {});
+        loadUnifiedHistory().catch(function() {});
       }
     })
     .catch(function(err) {
       console.error('Cancel error:', err);
       showToast('Error cancelling: ' + err.message, 'error');
       if (btn) { btn.disabled = false; }
-    })
-    .finally(function() {
-      // Don't re-enable button since number is removed
     });
 };
 
@@ -362,24 +358,27 @@ window.showToast = function(message, type) {
   }, 3000);
 };
 
-// ===== FIX: GRACE PERIOD TRACKER (4 min silent after code/timeout, then history) =====
+// ===== FIX: GRACE PERIOD TRACKER (5 minutes minimum for received codes) =====
+// ===== GRACE PERIOD - 5 minutes for received codes =====
 window.gracePeriodTimers = window.gracePeriodTimers || {};
-var GRACE_PERIOD_MS = 240000; // 4 minutes
+var GRACE_PERIOD_MS = 300000; // 5 minutes (300,000 ms)
 
 window.startGracePeriod = function(numberId) {
   if (window.gracePeriodTimers[numberId]) return;
+  
+  console.log('✅ Grace period STARTED for', numberId, '- will stay visible for 5 minutes');
+  
   window.gracePeriodTimers[numberId] = setTimeout(function() {
     delete window.gracePeriodTimers[numberId];
-    // Silently refresh — number moves from active to history on backend
-    if (typeof loadNumbers === 'function') {
-      loadNumbers().then(function() {
-        if (window.currentPage === 'numbers') renderMainContent();
-      });
-    }
-    if (typeof loadHistory === 'function') {
-      loadHistory().then(function() {
-        if (window.currentPage === 'history') renderMainContent();
-      });
+    
+    console.log('✅ Grace period ENDED for', numberId, '- removing now');
+    
+    // Remove from active numbers array
+    window.activeNumbers = window.activeNumbers.filter(function(n) { return n.id !== numberId; });
+    
+    // Refresh silently
+    if (window.currentPage === 'numbers' && typeof renderMainContent === 'function') {
+      renderMainContent();
     }
   }, GRACE_PERIOD_MS);
 };
@@ -388,6 +387,7 @@ window.clearGracePeriod = function(numberId) {
   if (window.gracePeriodTimers[numberId]) {
     clearTimeout(window.gracePeriodTimers[numberId]);
     delete window.gracePeriodTimers[numberId];
+    console.log('✅ Grace period CLEARED for', numberId);
   }
 };
 
@@ -395,7 +395,6 @@ window.clearGracePeriod = function(numberId) {
 var CANADIAN_AREA_CODES = ['204','226','236','249','250','263','289','306','343','354','365','367','368','382','387','403','416','418','431','437','438','450','474','506','514','519','548','579','581','584','587','600','604','613','639','647','672','683','705','709','742','753','778','780','782','807','819','825','867','873','879','902','905'];
 
 function getFlagFromPhone(phone, countryCode, country_code) {
-  // 1. Check explicit country flag from data
   if (countryCode) {
     var cc = countryCode.toLowerCase();
     var c1 = (typeof countries !== 'undefined') ? countries.find(function(c) { return c.code === cc; }) : null;
@@ -406,7 +405,6 @@ function getFlagFromPhone(phone, countryCode, country_code) {
     var c2 = (typeof countries !== 'undefined') ? countries.find(function(c) { return c.code === cc2; }) : null;
     if (c2) return c2.flag;
   }
-  // 2. Detect from phone number
   if (!phone) return '🌍';
   var p = phone.replace(/\s/g, '');
   if (p.charAt(0) === '+') p = p.substring(1);
@@ -434,7 +432,6 @@ function getFlagFromPhone(phone, countryCode, country_code) {
   else if (p.indexOf('60') === 0) return '🇲🇾';
   else if (p.indexOf('65') === 0) return '🇸🇬';
   else if (p.indexOf('7') === 0) return '🇷🇺';
-  // FIX: North American — distinguish Canada vs USA by area code
   else if (p.indexOf('1') === 0 && p.length >= 4) {
     var areaCode = p.substring(1, 4);
     if (CANADIAN_AREA_CODES.indexOf(areaCode) !== -1) return '🇨🇦';
@@ -443,13 +440,8 @@ function getFlagFromPhone(phone, countryCode, country_code) {
   return '🌍';
 }
 
-// ===== FIX: REMOVED duplicate fetchPricesForCountry and priceCache =====
-// The data.js version is used instead — it automatically applies addProfit() markup
-// so prices always reflect your % from the provider with no manual update needed.
-
 /* ===== AUTO-VERIFY DEPOSIT ON PAGE LOAD ===== */
 (function() {
-  // Check URL parameters for deposit status
   var urlParams = new URLSearchParams(window.location.search);
   var depositStatus = urlParams.get('deposit');
   var depositRef = urlParams.get('ref');
@@ -457,9 +449,8 @@ function getFlagFromPhone(phone, countryCode, country_code) {
   if (depositStatus === 'success' && depositRef) {
     console.log('Detected return from payment, verifying:', depositRef);
     
-    // Start polling for deposit status
     var verifyAttempts = 0;
-    var maxAttempts = 30; // 30 attempts * 3 seconds = 90 seconds max
+    var maxAttempts = 30;
     
     function checkDepositStatus() {
       verifyAttempts++;
@@ -470,20 +461,18 @@ function getFlagFromPhone(phone, countryCode, country_code) {
           console.log('Deposit check #' + verifyAttempts + ':', data.status);
           
           if (data.status === 'completed') {
-            // FIX: Use (data.amount || 0) not (data.amount || '') - empty string has no toFixed()
             var paidAmount = parseFloat(data.amount) || 0;
             
             if (typeof showToast === 'function') {
               showToast('Payment confirmed! $' + paidAmount.toFixed(2) + ' added to your balance.', 'success');
             }
             
-            // Keep refreshing balance for 2 minutes after completion
             if (typeof loadBalance === 'function') {
               loadBalance();
               var extraPolls = 0;
               (function keepPolling() {
                 extraPolls++;
-                if (extraPolls > 24) return; // 24 * 5s = 2 min
+                if (extraPolls > 24) return;
                 setTimeout(function() {
                   loadBalance();
                   keepPolling();
@@ -491,19 +480,16 @@ function getFlagFromPhone(phone, countryCode, country_code) {
               })();
             }
             
-            // Refresh deposit history
             setTimeout(function() {
               if (typeof loadDepositHistory === 'function') {
                 loadDepositHistory();
               }
             }, 1000);
             
-            // Clean URL
             window.history.replaceState({}, document.title, window.location.pathname);
             return;
           }
           
-          // Handle declined and cancelled statuses
           if (data.status === 'failed' || data.status === 'declined' || data.status === 'cancelled') {
             var failMsg = data.status === 'declined' ? 'Payment was declined.' : 
                          data.status === 'cancelled' ? 'Payment was cancelled.' : 'Payment failed.';
@@ -517,14 +503,12 @@ function getFlagFromPhone(phone, countryCode, country_code) {
             return;
           }
           
-          // Still pending - continue polling
           if (verifyAttempts < maxAttempts) {
             setTimeout(checkDepositStatus, 3000);
           } else {
             if (typeof showToast === 'function') {
               showToast('Payment is still processing. Your balance will update automatically once confirmed.', 'info');
             }
-            // Continue background polling less frequently
             startBackgroundPolling(depositRef);
           }
         })
@@ -536,11 +520,9 @@ function getFlagFromPhone(phone, countryCode, country_code) {
         });
     }
     
-    // Start checking after 2 seconds
     setTimeout(checkDepositStatus, 2000);
   }
   
-  // Handle declined and cancelled on direct URL return
   if (depositStatus === 'failed' || depositStatus === 'declined' || depositStatus === 'cancelled') {
     var directMsg = depositStatus === 'declined' ? 'Payment was declined.' : 
                     depositStatus === 'cancelled' ? 'Payment was cancelled.' : 'Payment failed.';
@@ -554,7 +536,6 @@ function getFlagFromPhone(phone, countryCode, country_code) {
   }
 })();
 
-// Background polling for pending deposits
 function startBackgroundPolling(reference) {
   var bgAttempts = 0;
   var bgMaxAttempts = 60;
@@ -567,21 +548,17 @@ function startBackgroundPolling(reference) {
       .then(function(res) { return res.json(); })
       .then(function(data) {
         if (data.status === 'completed') {
-          // FIX: Parse amount correctly
           var bgPaidAmount = parseFloat(data.amount) || 0;
           
           if (typeof showToast === 'function') {
             showToast('Payment confirmed! $' + bgPaidAmount.toFixed(2) + ' added to your balance.', 'success');
           }
           
-          // Record when completed was first seen
           if (!completedSeenAt) {
             completedSeenAt = Date.now();
             
-            // Immediately refresh balance
             if (typeof loadBalance === 'function') loadBalance();
             
-            // Keep refreshing balance every 5 seconds for 2 minutes
             var balancePollCount = 0;
             var balancePollMax = 24;
             
@@ -619,12 +596,10 @@ function startBackgroundPolling(reference) {
   setTimeout(bgCheck, 5000);
 }
 
-/* ===== AUTO-POLL PENDING DEPOSITS ON PAGE LOAD ===== */
 window.startPendingDepositsPolling = function() {
   var email = (typeof getUserEmail === 'function') ? getUserEmail() : null;
   if (!email) return;
   
-  // Check for any pending deposits
   fetch('/api/deposits/' + email)
     .then(function(res) { return res.json(); })
     .then(function(deposits) {
@@ -643,7 +618,6 @@ window.startPendingDepositsPolling = function() {
     });
 };
 
-// Call this after login
 var originalLoginCheck = window.checkAuth;
 if (originalLoginCheck) {
   window.checkAuth = function() {
@@ -661,7 +635,6 @@ function getServiceIconData(serviceName, serviceId, existingIcon) {
   var id = (serviceId || '').toLowerCase();
   var icon = (existingIcon || '').trim();
   
-  // CHECK IF IT'S A REAL IMAGE URL
   var isImage = /\.(png|jpg|jpeg|gif|svg|webp)(\?.*)?$/i.test(icon) || icon.indexOf('http') === 0 || icon.indexOf('/') === 0;
   if (isImage) {
     return { 
@@ -671,7 +644,6 @@ function getServiceIconData(serviceName, serviceId, existingIcon) {
     };
   }
 
-  // ===== FORCE REAL LOGOS BY SERVICE NAME =====
   var nameImageMap = {
     'whatsapp': 'https://upload.wikimedia.org/wikipedia/commons/a/a7/2062095_application_chat_communication_logo_whatsapp_icon.svg',
     'telegram': 'https://upload.wikimedia.org/wikipedia/commons/8/82/Telegram_logo.svg',
@@ -730,11 +702,9 @@ function getServiceIconData(serviceName, serviceId, existingIcon) {
     'pubg': 'https://upload.wikimedia.org/wikipedia/commons/2/28/PUBG_logo.svg',
     'slack': 'https://upload.wikimedia.org/wikipedia/commons/d/d5/Slack_icon_2019.svg',
     'github': 'https://upload.wikimedia.org/wikipedia/commons/9/91/GitHub_logo.svg',
-    'snapchat': 'https://upload.wikimedia.org/wikipedia/commons/e/e5/Snapchat_logo.svg',
     'alipay': 'https://upload.wikimedia.org/wikipedia/commons/d/d5/Alipay_logo_%282021%29.svg',
   };
   
-  // Check if service name matches a known brand with a real logo
   var nameKeys = Object.keys(nameImageMap).sort(function(a, b) { return b.length - a.length; });
   for (var img_i = 0; img_i < nameKeys.length; img_i++) {
     if (name.indexOf(nameKeys[img_i]) !== -1) {
@@ -746,14 +716,11 @@ function getServiceIconData(serviceName, serviceId, existingIcon) {
       };
     }
   }
+  
   var iconColorMap = {
     'fab fa-whatsapp':        { color: '#25D366', bg: 'rgba(37,211,102,0.12)' },
-    'fab fa-whatsapp-plane':  { color: '#26A5E4', bg: 'rgba(38,165,228,0.12)' },
-    'fab fa-telegram-plane':  { color: '#26A5E4', bg: 'rgba(38,165,228,0.12)' },
     'fab fa-telegram':        { color: '#26A5E4', bg: 'rgba(38,165,228,0.12)' },
     'fab fa-facebook-f':      { color: '#1877F2', bg: 'rgba(24,119,242,0.12)' },
-    'fab fa-facebook':        { color: '#1877F2', bg: 'rgba(24,119,242,0.12)' },
-    'fab fa-meta':            { color: '#0668E1', bg: 'rgba(6,104,225,0.12)' },
     'fab fa-instagram':       { color: '#E4405F', bg: 'rgba(228,64,95,0.12)' },
     'fab fa-x-twitter':       { color: '#000000', bg: 'rgba(0,0,0,0.08)' },
     'fab fa-tiktok':          { color: '#000000', bg: 'rgba(0,0,0,0.08)' },
@@ -765,183 +732,72 @@ function getServiceIconData(serviceName, serviceId, existingIcon) {
     'fab fa-uber':            { color: '#000000', bg: 'rgba(0,0,0,0.08)' },
     'fab fa-paypal':          { color: '#003087', bg: 'rgba(0,48,135,0.12)' },
     'fab fa-steam':           { color: '#1B2838', bg: 'rgba(27,40,56,0.12)' },
-    'fab fa-font-awesome':    { color: '#00B22D', bg: 'rgba(0,178,45,0.12)' },
     'fab fa-snapchat':        { color: '#FFFC00', bg: 'rgba(255,252,0,0.18)' },
-    'fab fa-linkedin':        { color: '#0A66C2', bg: 'rgba(10,102,194,0.12)' },
     'fab fa-linkedin-in':     { color: '#0A66C2', bg: 'rgba(10,102,194,0.12)' },
     'fab fa-vk':              { color: '#0077FF', bg: 'rgba(0,119,255,0.12)' },
     'fab fa-skype':           { color: '#00AFF0', bg: 'rgba(0,175,240,0.12)' },
     'fab fa-twitch':          { color: '#9146FF', bg: 'rgba(145,70,255,0.12)' },
-    'fab fa-bitcoin':         { color: '#F7931A', bg: 'rgba(247,147,26,0.12)' },
-    'fab fa-ethereum':        { color: '#627EEA', bg: 'rgba(98,126,234,0.12)' },
     'fab fa-netflix':         { color: '#E50914', bg: 'rgba(229,9,20,0.12)' },
-    'fab fa-disney':          { color: '#113CCF', bg: 'rgba(17,60,207,0.12)' },
     'fab fa-airbnb':          { color: '#FF5A5F', bg: 'rgba(255,90,95,0.12)' },
-    'fab fa-yahoo':           { color: '#6001D2', bg: 'rgba(96,1,210,0.12)' },
-    'fab fa-alipay':          { color: '#1677FF', bg: 'rgba(22,119,255,0.12)' },
-    'fab fa-ebay':            { color: '#E53238', bg: 'rgba(229,50,56,0.12)' },
-    'fab fa-bilibili':        { color: '#00A1D6', bg: 'rgba(0,161,214,0.12)' },
-    'fab fa-weibo':           { color: '#E6162D', bg: 'rgba(230,22,45,0.12)' },
-    'fab fa-weixin':          { color: '#07C160', bg: 'rgba(7,193,96,0.12)' },
-    'fab fa-line':            { color: '#00C300', bg: 'rgba(0,195,0,0.12)' },
-    'fab fa-viber':           { color: '#7360F2', bg: 'rgba(115,96,242,0.12)' },
-    'fab fa-nike':            { color: '#111111', bg: 'rgba(17,17,17,0.08)' },
-    'fab fa-baidu':           { color: '#2932E1', bg: 'rgba(41,50,225,0.12)' },
-    'fab fa-git':             { color: '#F05032', bg: 'rgba(240,80,50,0.12)' },
-    'fab fa-stripe-s':        { color: '#635BFF', bg: 'rgba(99,91,255,0.12)' },
-    'fab fa-odnoklassniki':   { color: '#EE8208', bg: 'rgba(238,130,8,0.12)' },
-    'fab fa-yandex':          { color: '#FF0000', bg: 'rgba(255,0,0,0.12)' },
     'fab fa-spotify':         { color: '#1DB954', bg: 'rgba(29,185,84,0.12)' },
     'fab fa-reddit-alien':    { color: '#FF4500', bg: 'rgba(255,69,0,0.12)' },
-    'fab fa-pinterest-p':     { color: '#BD081C', bg: 'rgba(189,8,28,0.12)' },
     'fab fa-venmo':           { color: '#3D95CE', bg: 'rgba(61,149,206,0.12)' },
     'fab fa-apple':           { color: '#000000', bg: 'rgba(0,0,0,0.08)' },
     'fab fa-slack':           { color: '#4A154B', bg: 'rgba(74,21,75,0.12)' },
     'fab fa-github':          { color: '#181717', bg: 'rgba(24,23,23,0.10)' },
   };
 
-  // 1) If data.js already has an icon, use it with brand color
   if (icon && iconColorMap[icon]) {
     var mapped = iconColorMap[icon];
     return { html: '<i class="' + icon + '"></i>', color: mapped.color, bg: mapped.bg };
   }
 
-  // 2) Name/ID based mapping for services with generic icons in data.js
   var nameMap = {
     'whatsapp':              { icon: 'fab fa-whatsapp',       color: '#25D366', bg: 'rgba(37,211,102,0.12)' },
     'telegram':              { icon: 'fab fa-telegram',       color: '#26A5E4', bg: 'rgba(38,165,228,0.12)' },
     'facebook':              { icon: 'fab fa-facebook-f',     color: '#1877F2', bg: 'rgba(24,119,242,0.12)' },
     'instagram':             { icon: 'fab fa-instagram',      color: '#E4405F', bg: 'rgba(228,64,95,0.12)' },
-    'threads':               { icon: 'fab fa-instagram',      color: '#E4405F', bg: 'rgba(228,64,95,0.12)' },
     'tiktok':                { icon: 'fab fa-tiktok',         color: '#000000', bg: 'rgba(0,0,0,0.08)' },
-    'douyin':                { icon: 'fab fa-tiktok',         color: '#000000', bg: 'rgba(0,0,0,0.08)' },
     'twitter':               { icon: 'fab fa-x-twitter',      color: '#000000', bg: 'rgba(0,0,0,0.08)' },
     'google':                { icon: 'fab fa-google',         color: '#4285F4', bg: 'rgba(66,133,244,0.12)' },
-    'gmail':                 { icon: 'fab fa-google',         color: '#EA4335', bg: 'rgba(234,67,53,0.12)' },
     'youtube':               { icon: 'fab fa-youtube',        color: '#FF0000', bg: 'rgba(255,0,0,0.12)' },
     'amazon':                { icon: 'fab fa-amazon',         color: '#FF9900', bg: 'rgba(255,153,0,0.12)' },
     'discord':               { icon: 'fab fa-discord',        color: '#5865F2', bg: 'rgba(88,101,242,0.12)' },
     'microsoft':             { icon: 'fab fa-microsoft',      color: '#00A4EF', bg: 'rgba(0,164,239,0.12)' },
-    'outlook':               { icon: 'fab fa-microsoft',      color: '#0078D4', bg: 'rgba(0,120,212,0.12)' },
     'uber':                  { icon: 'fab fa-uber',           color: '#000000', bg: 'rgba(0,0,0,0.08)' },
     'paypal':                { icon: 'fab fa-paypal',         color: '#003087', bg: 'rgba(0,48,135,0.12)' },
     'steam':                 { icon: 'fab fa-steam',          color: '#1B2838', bg: 'rgba(27,40,56,0.12)' },
-    'fiverr':                { icon: 'fab fa-font-awesome',   color: '#00B22D', bg: 'rgba(0,178,45,0.12)' },
     'snapchat':              { icon: 'fab fa-snapchat',       color: '#FFFC00', bg: 'rgba(255,252,0,0.18)' },
     'linkedin':              { icon: 'fab fa-linkedin-in',    color: '#0A66C2', bg: 'rgba(10,102,194,0.12)' },
-    'vkontakte':             { icon: 'fab fa-vk',             color: '#0077FF', bg: 'rgba(0,119,255,0.12)' },
-    'в контакте':            { icon: 'fab fa-vk',             color: '#0077FF', bg: 'rgba(0,119,255,0.12)' },
     'skype':                 { icon: 'fab fa-skype',          color: '#00AFF0', bg: 'rgba(0,175,240,0.12)' },
     'twitch':                { icon: 'fab fa-twitch',         color: '#9146FF', bg: 'rgba(145,70,255,0.12)' },
     'tinder':                { icon: 'fas fa-fire',           color: '#FE3C72', bg: 'rgba(254,60,114,0.12)' },
-    'signal':                { icon: 'fas fa-comment-dots',   color: '#3A76F0', bg: 'rgba(58,118,240,0.12)' },
     'viber':                 { icon: 'fab fa-viber',          color: '#7360F2', bg: 'rgba(115,96,242,0.12)' },
     'line':                  { icon: 'fab fa-line',           color: '#00C300', bg: 'rgba(0,195,0,0.12)' },
-    'kakaotalk':             { icon: 'fas fa-comment',        color: '#FEE500', bg: 'rgba(254,229,0,0.15)' },
     'netflix':               { icon: 'fab fa-netflix',        color: '#E50914', bg: 'rgba(229,9,20,0.12)' },
-    'disney+':               { icon: 'fab fa-disney',         color: '#113CCF', bg: 'rgba(17,60,207,0.12)' },
     'openai':                { icon: 'fas fa-brain',          color: '#10A37F', bg: 'rgba(16,163,127,0.12)' },
     'chatgpt':               { icon: 'fas fa-brain',          color: '#10A37F', bg: 'rgba(16,163,127,0.12)' },
-    'claude':                { icon: 'fas fa-brain',          color: '#D97706', bg: 'rgba(217,119,6,0.12)' },
-    'deepseek':              { icon: 'fas fa-brain',          color: '#4F46E5', bg: 'rgba(79,70,229,0.12)' },
     'airbnb':                { icon: 'fab fa-airbnb',         color: '#FF5A5F', bg: 'rgba(255,90,95,0.12)' },
-    'booking.com':           { icon: 'fas fa-hotel',          color: '#003580', bg: 'rgba(0,53,128,0.12)' },
-    'yahoo':                 { icon: 'fab fa-yahoo',          color: '#6001D2', bg: 'rgba(96,1,210,0.12)' },
     'coinbase':              { icon: 'fas fa-circle-dollar-to-slot', color: '#0052FF', bg: 'rgba(0,82,255,0.12)' },
     'binance':               { icon: 'fas fa-coins',          color: '#F0B90B', bg: 'rgba(240,185,11,0.12)' },
-    'bybit':                 { icon: 'fas fa-coins',          color: '#F7A600', bg: 'rgba(247,166,0,0.12)' },
-    'okx':                   { icon: 'fas fa-coins',          color: '#000000', bg: 'rgba(0,0,0,0.08)' },
-    'mexc':                  { icon: 'fas fa-coins',          color: '#0052FF', bg: 'rgba(0,82,255,0.12)' },
-    'bitget':                { icon: 'fas fa-coins',          color: '#00F0FF', bg: 'rgba(0,240,255,0.12)' },
     'venmo':                 { icon: 'fab fa-venmo',          color: '#3D95CE', bg: 'rgba(61,149,206,0.12)' },
     'cash app':              { icon: 'fas fa-dollar-sign',    color: '#00C853', bg: 'rgba(0,200,83,0.12)' },
-    'wise':                  { icon: 'fas fa-exchange-alt',   color: '#9FE870', bg: 'rgba(0,100,60,0.12)' },
-    'skrill':                { icon: 'fas fa-credit-card',    color: '#8621A8', bg: 'rgba(134,33,168,0.12)' },
-    'uphold':                { icon: 'fas fa-arrows-alt-v',   color: '#06B6D4', bg: 'rgba(6,182,212,0.12)' },
-    'lyft':                  { icon: 'fas fa-car',            color: '#FF00BF', bg: 'rgba(255,0,191,0.12)' },
-    'bolt':                  { icon: 'fas fa-bolt',           color: '#34D058', bg: 'rgba(52,208,88,0.12)' },
-    'grab':                  { icon: 'fas fa-taxi',           color: '#00B14F', bg: 'rgba(0,177,79,0.12)' },
-    'aliexpress':            { icon: 'fab fa-alipay',         color: '#FF4747', bg: 'rgba(255,71,71,0.12)' },
-    'taobao':                { icon: 'fab fa-alipay',         color: '#FF5000', bg: 'rgba(255,80,0,0.12)' },
-    'ebay':                  { icon: 'fab fa-ebay',           color: '#E53238', bg: 'rgba(229,50,56,0.12)' },
-    'shopee':                { icon: 'fas fa-shopping-bag',   color: '#EE4D2D', bg: 'rgba(238,77,45,0.12)' },
-    'temu':                  { icon: 'fas fa-shopping-bag',   color: '#FB6527', bg: 'rgba(251,101,39,0.12)' },
     'nike':                  { icon: 'fab fa-nike',           color: '#111111', bg: 'rgba(17,17,17,0.08)' },
     'walmart':               { icon: 'fas fa-shopping-cart',  color: '#0071CE', bg: 'rgba(0,113,206,0.12)' },
-    'bilibili':              { icon: 'fab fa-bilibili',       color: '#00A1D6', bg: 'rgba(0,161,214,0.12)' },
-    'weibo':                 { icon: 'fab fa-weibo',          color: '#E6162D', bg: 'rgba(230,22,45,0.12)' },
-    'xiaohongshu':           { icon: 'fas fa-sticky-note',    color: '#FF2442', bg: 'rgba(255,36,66,0.12)' },
-    'rednote':               { icon: 'fas fa-sticky-note',    color: '#FF2442', bg: 'rgba(255,36,66,0.12)' },
     'roblox':                { icon: 'fas fa-gamepad',        color: '#E2231A', bg: 'rgba(226,35,26,0.12)' },
-    'pubg':                  { icon: 'fas fa-gamepad',        color: '#F2A900', bg: 'rgba(242,169,0,0.12)' },
-    'baidu':                 { icon: 'fab fa-baidu',          color: '#2932E1', bg: 'rgba(41,50,225,0.12)' },
     'yandex':                { icon: 'fab fa-yandex',         color: '#FF0000', bg: 'rgba(255,0,0,0.12)' },
-    'zalo':                  { icon: 'fas fa-comment',        color: '#0068FF', bg: 'rgba(0,104,255,0.12)' },
-    'zoho':                  { icon: 'fas fa-building',       color: '#D7282D', bg: 'rgba(215,40,45,0.12)' },
-    'vercel':                { icon: 'fas fa-code',           color: '#000000', bg: 'rgba(0,0,0,0.08)' },
     'truecaller':            { icon: 'fas fa-phone',          color: '#0F82FF', bg: 'rgba(15,130,255,0.12)' },
     'authy':                 { icon: 'fas fa-shield-alt',     color: '#EC1C24', bg: 'rgba(236,28,36,0.12)' },
-    'tradingview':           { icon: 'fas fa-chart-line',     color: '#2962FF', bg: 'rgba(41,98,255,0.12)' },
     'nvidia':                { icon: 'fas fa-microchip',      color: '#76B900', bg: 'rgba(118,185,0,0.12)' },
-    'foodpanda':             { icon: 'fas fa-utensils',       color: '#D70C64', bg: 'rgba(215,12,100,0.12)' },
-    'glovo':                 { icon: 'fas fa-utensils',       color: '#F6C744', bg: 'rgba(246,199,68,0.12)' },
-    'wolt':                  { icon: 'fas fa-utensils',       color: '#336BFF', bg: 'rgba(51,107,255,0.12)' },
-    'careem':                { icon: 'fas fa-taxi',           color: '#4CB050', bg: 'rgba(76,176,80,0.12)' },
-    'blablacar':             { icon: 'fas fa-car',            color: '#0066FF', bg: 'rgba(0,102,255,0.12)' },
-    'razer':                 { icon: 'fas fa-gamepad',        color: '#00FF00', bg: 'rgba(0,255,0,0.12)' },
-    'ubisoft':               { icon: 'fas fa-gamepad',        color: '#0070FF', bg: 'rgba(0,112,255,0.12)' },
-    'shein':                 { icon: 'fas fa-tshirt',         color: '#000000', bg: 'rgba(0,0,0,0.08)' },
-    'zara':                  { icon: 'fas fa-tshirt',         color: '#000000', bg: 'rgba(0,0,0,0.08)' },
-    'depop':                 { icon: 'fas fa-tshirt',         color: '#FF2D55', bg: 'rgba(255,45,85,0.12)' },
-    'vinted':                { icon: 'fas fa-tshirt',         color: '#00C1B5', bg: 'rgba(0,193,181,0.12)' },
-    'poshmark':              { icon: 'fas fa-tshirt',         color: '#C80C5A', bg: 'rgba(200,12,90,0.12)' },
-    'etsy':                  { icon: 'fas fa-palette',        color: '#F1641E', bg: 'rgba(241,100,30,0.12)' },
-    'olx':                   { icon: 'fas fa-tag',            color: '#3276D1', bg: 'rgba(50,118,209,0.12)' },
-    'swiggy':                { icon: 'fas fa-utensils',       color: '#FC8019', bg: 'rgba(252,128,25,0.12)' },
-    'flipkart':              { icon: 'fas fa-shopping-cart',  color: '#2874F0', bg: 'rgba(40,116,240,0.12)' },
-    'wildberries':           { icon: 'fas fa-shopping-bag',   color: '#A80044', bg: 'rgba(168,0,68,0.12)' },
-    'ozon':                  { icon: 'fas fa-shopping-cart',  color: '#005BFF', bg: 'rgba(0,91,255,0.12)' },
-    'trendyol':              { icon: 'fas fa-shopping-bag',   color: '#F22E52', bg: 'rgba(242,46,82,0.12)' },
-    'meituan':               { icon: 'fas fa-utensils',       color: '#FFC300', bg: 'rgba(255,195,0,0.12)' },
-    'pof':                   { icon: 'fas fa-fish',           color: '#004B8D', bg: 'rgba(0,75,141,0.12)' },
-    'badoo':                 { icon: 'fas fa-heart',          color: '#7B2D8E', bg: 'rgba(123,45,142,0.12)' },
-    'bumble':                { icon: 'fas fa-bolt',           color: '#FFC629', bg: 'rgba(255,198,41,0.12)' },
-    'hinge':                 { icon: 'fas fa-heart',          color: '#7B61FF', bg: 'rgba(123,97,255,0.12)' },
-    'likee':                 { icon: 'fas fa-video',          color: '#EE1D52', bg: 'rgba(238,29,82,0.12)' },
-    'rumble':                { icon: 'fas fa-video',          color: '#85C742', bg: 'rgba(133,199,66,0.12)' },
-    'kwai':                  { icon: 'fas fa-video',          color: '#FF4906', bg: 'rgba(255,73,6,0.12)' },
-    'azar':                  { icon: 'fas fa-video',          color: '#FF5722', bg: 'rgba(255,87,34,0.12)' },
-    'gitcoin':               { icon: 'fab fa-git',            color: '#0ACF83', bg: 'rgba(10,207,131,0.12)' },
-    'wechat':                { icon: 'fab fa-weixin',         color: '#07C160', bg: 'rgba(7,193,96,0.12)' },
-    'weixin':                { icon: 'fab fa-weixin',         color: '#07C160', bg: 'rgba(7,193,96,0.12)' },
-    'booking':               { icon: 'fas fa-hotel',          color: '#003580', bg: 'rgba(0,53,128,0.12)' },
-    'ticketmaster':          { icon: 'fas fa-ticket-alt',     color: '#026DFE', bg: 'rgba(2,109,254,0.12)' },
-    'jd':                    { icon: 'fas fa-shopping-cart',  color: '#E4393C', bg: 'rgba(228,57,60,0.12)' },
-    '京东':                  { icon: 'fas fa-shopping-cart',  color: '#E4393C', bg: 'rgba(228,57,60,0.12)' },
-    'chime':                 { icon: 'fas fa-university',     color: '#00A3E0', bg: 'rgba(0,163,224,0.12)' },
-    'bofa':                  { icon: 'fas fa-university',     color: '#012169', bg: 'rgba(1,33,105,0.12)' },
-    'bank of america':       { icon: 'fas fa-university',     color: '#012169', bg: 'rgba(1,33,105,0.12)' },
-    'sber':                  { icon: 'fas fa-university',     color: '#21A038', bg: 'rgba(33,160,56,0.12)' },
-    'caixa':                 { icon: 'fas fa-university',     color: '#003C71', bg: 'rgba(0,60,113,0.12)' },
-    'go2bank':               { icon: 'fas fa-university',     color: '#0072CE', bg: 'rgba(0,114,206,0.12)' },
-    'monese':                { icon: 'fas fa-euro-sign',      color: '#14CCCC', bg: 'rgba(20,204,204,0.12)' },
-    'paypay':                { icon: 'fas fa-credit-card',    color: '#FF0000', bg: 'rgba(255,0,0,0.12)' },
-    'picpay':                { icon: 'fas fa-credit-card',    color: '#21C25E', bg: 'rgba(33,194,94,0.12)' },
-    'papara':                { icon: 'fas fa-credit-card',    color: '#6C3FC5', bg: 'rgba(108,63,197,0.12)' },
-    'paysafe':               { icon: 'fas fa-credit-card',    color: '#F05A22', bg: 'rgba(240,90,34,0.12)' },
-    'affirm':                { icon: 'fas fa-credit-card',    color: '#4A90D9', bg: 'rgba(74,144,217,0.12)' },
-    'credit karma':          { icon: 'fas fa-chart-line',     color: '#29B6F6', bg: 'rgba(41,182,246,0.12)' },
     'any other':             { icon: 'fas fa-globe',          color: '#0d9b7a', bg: 'rgba(13,155,122,0.12)' },
     'any':                   { icon: 'fas fa-globe',          color: '#0d9b7a', bg: 'rgba(13,155,122,0.12)' },
   };
   
-  // Match by name (longer keys first)
   var keys = Object.keys(nameMap).sort(function(a, b) { return b.length - a.length; });
   for (var i = 0; i < keys.length; i++) {
      if (name.indexOf(keys[i]) !== -1) { var m = nameMap[keys[i]]; return { html: '<i class="' + m.icon + '"></i>', color: m.color, bg: m.bg }; }
   }
   
-  // Match by id
   var idMap = {
     'wa': 'whatsapp', 'tg': 'telegram', 'fb': 'facebook', 'ig': 'instagram',
     'tk': 'tiktok', 'tw': 'twitter', 'vb': 'viber', 'sk': 'skype',
@@ -949,32 +805,68 @@ function getServiceIconData(serviceName, serviceId, existingIcon) {
   };
   if (idMap[id]) { var m2 = nameMap[idMap[id]]; return { html: '<i class="' + m2.icon + '"></i>', color: m2.color, bg: m2.bg }; }
   
-  // If data.js had an icon but no color match, use generic dark color
   if (icon) {
     return { html: '<i class="' + icon + '"></i>', color: '#374151', bg: 'rgba(55,65,81,0.08)' };
   }
   
-  // Default fallback
   return { html: '<i class="fas fa-mobile-alt"></i>', color: 'var(--text-secondary)', bg: 'rgba(0,0,0,0.05)' };
 }
 
+// ===== FIX: renderNumbersPage - Show WAITING and RECEIVED numbers =====
 function renderNumbersPage(main) {
-  // FIX: Only show WAITING numbers in active section
-  // Received/expired numbers enter 4-min grace period silently, then move to history
-  var waitingOnlyNumbers = activeNumbers ? activeNumbers.filter(function(n) { return n.status === 'waiting' || n.status === 'received'; }) : [];
-  var totalActive = waitingOnlyNumbers.length;
-
-  // FIX: Start grace period for received/expired numbers (silent 4-min countdown)
-  if (activeNumbers) {
-    activeNumbers.forEach(function(n) {
-      if (n.status === 'received' || n.status === 'expired') {
-        startGracePeriod(n.id);
+  var now = Date.now();
+  
+  // ✅ Show only VALID waiting and received numbers - NO handleExpiredNumber calls here
+  var visibleNumbers = (activeNumbers || []).filter(function(n) {
+    // Skip if already marked as handled
+    if (n._expiredHandled) return false;
+    
+    // Skip explicitly expired status
+    if (n.status === 'expired') return false;
+    
+    // Skip if in the handled set
+    var phone = (n.phone || '').replace(/[^\d]/g, '');
+    var lockKey = phone || n.id;
+    if (lockKey && window._expiredHandledIds && window._expiredHandledIds.has(lockKey)) {
+      return false;
+    }
+    
+    // Show both waiting AND received status
+    if (n.status !== 'waiting' && n.status !== 'received') return false;
+    
+    // For waiting numbers, check if expired based on timestamp
+    // BUT DON'T call handleExpiredNumber - just silently filter out
+    if (n.status === 'waiting') {
+      var totalTime = n.total_time || n.totalTime || 300;
+      var createdAt = n.created_at;
+      
+      if (createdAt) {
+        var ts = new Date(createdAt).getTime();
+        if (isNaN(ts)) {
+          ts = new Date(createdAt.replace(' ', 'T') + 'Z').getTime();
+        }
+        
+        if (!isNaN(ts)) {
+          var elapsed = Math.floor((now - ts) / 1000);
+          if (elapsed < 0) elapsed = 0;
+          var timeLeft = totalTime - elapsed;
+          
+          // ✅ SILENTLY filter out - don't call handleExpiredNumber here
+          // The timer-based checkExpiredNumbers will handle the actual expiration
+          if (timeLeft <= 0) {
+            return false;
+          }
+        }
       }
-    });
-  }
+    }
+    
+    return true;
+  });
+  
+  var totalActive = visibleNumbers.length;
 
   var activeNumbersHTML = totalActive > 0
-    ? waitingOnlyNumbers.map(renderActiveNumberCard).join('')
+    ? visibleNumbers.map(renderActiveNumberCard).join('')
     : '<div style="padding:22px;border:1px dashed var(--border);border-radius:14px;color:var(--text-secondary);font-size:14px;">No active numbers yet. Buy one from below.</div>';
 
   var mobileSearchHTML = '<div class="mobile-search-wrapper" style="margin-bottom:20px;">' +
@@ -994,7 +886,6 @@ function renderNumbersPage(main) {
     '</div>' +
   '</div>';
 
-    // ✅ FIX: Added scroll-down chevron button
   var scrollDownBtn = totalActive > 0 ? 
     '<div style="text-align:center;margin-top:12px;">' +
       '<button onclick="document.getElementById(\'mobileServiceGridWrapper\').scrollIntoView({behavior:\'smooth\',block:\'start\'})" ' +
@@ -1029,7 +920,7 @@ function renderNumbersPage(main) {
       '</div>' +
       '<div style="background:rgba(13,155,122,0.08);border:1px solid rgba(13,155,122,0.2);border-radius:12px;padding:16px;box-shadow:var(--shadow-sm);">' +
         '<h3 style="font-size:13px;font-weight:700;margin-bottom:8px;color:var(--accent);">Automatic Refunds</h3>' +
-        '<p style="font-size:12px;color:var(--text-secondary);line-height:1.5;">Funds will be automatically refunded to your wallet if the request times out or is canceled.</p>' +
+        '<p style="font-size:12px;color:var(--text-secondary);line-height:1.5;">Funds are automatically refunded if the number expires without receiving a code.</p>' +
       '</div>' +
     '</div>' +
     '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:18px;padding:28px;box-shadow:var(--shadow-sm);margin-bottom:28px;">' +
@@ -1065,21 +956,17 @@ window.filterMobileServices = function(query) {
 
 /* ===== Card for combined Number + Code display ===== */
 function renderActiveNumberCard(n) {
-  // FIXED: Calculate time from timestamp, not stale time_left
   var totalTime = n.total_time || n.totalTime || 300;
   var createdTimestamp = n.created_at;
   
-  // Handle ALL timestamp formats robustly
   if (typeof createdTimestamp === 'string') {
     createdTimestamp = new Date(createdTimestamp).getTime();
-    // If ISO parse failed, try SQLite format "2025-01-15 10:00:00"
     if (isNaN(createdTimestamp)) {
       createdTimestamp = new Date(createdTimestamp.replace(' ', 'T') + 'Z').getTime();
     }
   } else if (createdTimestamp instanceof Date) {
     createdTimestamp = createdTimestamp.getTime();
   } else if (typeof createdTimestamp === 'number') {
-    // If it's a Unix timestamp in seconds (not milliseconds), convert
     if (createdTimestamp < 10000000000) createdTimestamp *= 1000;
   } else {
     createdTimestamp = null;
@@ -1087,16 +974,13 @@ function renderActiveNumberCard(n) {
   
   var timeLeft;
   if (createdTimestamp && !isNaN(createdTimestamp)) {
-    // Calculate from actual timestamp
     var elapsedSeconds = Math.floor((Date.now() - createdTimestamp) / 1000);
     if (elapsedSeconds < 0) elapsedSeconds = 0;
     timeLeft = totalTime - elapsedSeconds;
   } else {
-    // Fallback: use time_left from DB (shouldn't happen with Fix 1)
     timeLeft = (n.time_left !== undefined && n.time_left !== null) ? n.time_left : (n.timeLeft || totalTime);
   }
   
-  // Cap at 0 minimum
   if (timeLeft < 0) timeLeft = 0;
   
   var serviceName = n.service_name || (n.service ? n.service.name : 'Unknown');
@@ -1124,7 +1008,6 @@ function renderActiveNumberCard(n) {
     ? '<button class="btn-sm cancel" onclick="cancelNumber(' + n.id + ')" style="padding:4px 8px;font-size:11px;background:var(--danger);color:white;border:none;border-radius:6px;cursor:pointer;"><i class="fas fa-times"></i></button>'
     : '';
 
-  // ✅ FIX: Only show timer for WAITING status, not for received or expired
   var timerHTML = '';
   if (n.status === 'waiting') {
     timerHTML = '<span style="font-family:JetBrains Mono,monospace;font-size:11px;font-weight:600;color:' + statusColor + ';min-width:35px;text-align:right;" id="timer-active-' + n.id + '" data-total-time="' + totalTime + '" data-created-at="' + (n.created_at || '') + '">' + timerDisplay + '</span>';
@@ -1148,108 +1031,239 @@ function renderActiveNumberCard(n) {
   '</div>';
 }
 
-// ===== REPLACE checkExpiredNumbers WITH THIS VERSION =====
+// ===== FIX: handleExpiredNumber - Silent and robust duplicate prevention =====
+window._expiredHandledIds = window._expiredHandledIds || new Set();
+
+window.handleExpiredNumber = function(number) {
+  if (!number) return;
+  
+  var phone = (number.phone || '').replace(/[^\d]/g, '');
+  var ids = [number.id, number.provider_request_id, phone].filter(Boolean);
+  
+  // ✅ Create a single lock key (use phone as primary, fallback to id)
+  var lockKey = phone || ids[0];
+  if (!lockKey) return;
+  
+  // ✅ ATOMIC CHECK - if already handled, return IMMEDIATELY
+  if (window._expiredHandledIds.has(lockKey)) return;
+  
+  // ✅ Mark as handled FIRST (synchronous - prevents race condition)
+  window._expiredHandledIds.add(lockKey);
+  ids.forEach(function(id) { window._expiredHandledIds.add(String(id)); });
+  number._expiredHandled = true;
+  
+  // Update local state immediately
+  number.status = 'expired';
+  number.time_left = 0;
+  
+  // ✅ Track if we actually removed it (only refund if removed)
+  var wasRemoved = false;
+  window.activeNumbers = (window.activeNumbers || []).filter(function(n) {
+    var nPhone = (n.phone || '').replace(/[^\d]/g, '');
+    // Check if this is the same number
+    if (nPhone && nPhone === phone) { wasRemoved = true; return false; }
+    if (n.id && String(n.id) === String(number.id)) { wasRemoved = true; return false; }
+    if (n.provider_request_id && String(n.provider_request_id) === String(number.provider_request_id)) { wasRemoved = true; return false; }
+    return true;
+  });
+  
+  // ✅ Only call refund API if we actually removed it from the array
+  if (wasRemoved) {
+    var apiId = number.id || number.provider_request_id;
+    if (apiId) {
+      fetch('/api/numbers/' + apiId + '/expire', { method: 'POST' }).catch(function() {});
+    }
+  }
+  
+  // ✅ Batch render - prevents multiple rapid re-renders
+  if (!window._pendingRender) {
+    window._pendingRender = true;
+    requestAnimationFrame(function() {
+      window._pendingRender = false;
+      if (window.currentPage === 'numbers' && typeof renderMainContent === 'function') {
+        renderMainContent();
+      }
+    });
+  }
+};
+
+
+window.loadDepositHistory = function() {
+  var email = (typeof getUserEmail === 'function') ? getUserEmail() : '';
+  if (!email) return;
+  
+  fetch('/api/deposits/' + email)
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      var container = document.getElementById('depositHistoryList');
+      if (!container) return;
+      if (data.length === 0) {
+        container.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-muted);font-size:13px;">No deposits yet</div>';
+        return;
+      }
+      // ... render deposit items
+    })
+    .catch(function(err) {
+      console.warn('Failed to load deposit history:', err);
+    });
+};
+
+// ===== SIMPLIFIED: Only update timer display, NO SMS checking (handled by polling) =====
+// ===== TIMER UPDATER - Two-pass to prevent modification during iteration =====
 async function checkExpiredNumbers() {
   if (!window.activeNumbers || window.activeNumbers.length === 0) return;
   
-  var changed = false;
-  
-  for (var i = 0; i < window.activeNumbers.length; i++) {
-    var n = window.activeNumbers[i];
-    
-    // ✅ FIX: Skip timer updates for received/expired numbers
-    if (n.status !== 'waiting') continue;
-    
-    var timerEl = document.getElementById('timer-active-' + n.id);
-    if (!timerEl) continue;
-    
-    // ===== FIX: Calculate from real timestamp, not DOM text =====
-    var totalTime = parseInt(timerEl.dataset.totalTime) || 300;
-    var createdAt = timerEl.dataset.createdAt;
-    var timeLeft = totalTime;
-    
-    if (createdAt) {
-      var ts = new Date(createdAt).getTime();
-      if (isNaN(ts)) {
-        ts = new Date(createdAt.replace(' ', 'T') + 'Z').getTime();
-      }
-      if (!isNaN(ts)) {
-        var elapsed = Math.floor((Date.now() - ts) / 1000);
-        if (elapsed < 0) elapsed = 0;
-        timeLeft = totalTime - elapsed;
-      }
-    } else {
-      // Fallback: read DOM and decrement (only if no timestamp)
-      var timeStr = timerEl.textContent.trim();
-      var parts = timeStr.split(':');
-      timeLeft = (parseInt(parts[0], 10) || 0) * 60 + (parseInt(parts[1], 10) || 0);
-      if (timeLeft > 0) timeLeft--;
-    }
-    
-    if (timeLeft < 0) timeLeft = 0;
-    
-    // Update display
-    var minutes = Math.floor(timeLeft / 60);
-    var seconds = timeLeft % 60;
-    timerEl.textContent = String(minutes).padStart(2, '0') + ':' + String(seconds).padStart(2, '0');
-    
-    // Check SMS-Bus status every 10 seconds (not every second to avoid rate limits)
-    if (timeLeft % 10 === 0 || timeLeft === 0) {
-      (function(number) {
-        smsbusCheckStatus(number.id)
-          .then(function(statusData) {
-            var smsStatus = statusData.status;
-            var smsCode = statusData.sms_code || '';
-            
-            if (smsStatus === 'received' && smsCode) {
-              number.status = 'received';
-              number.code = smsCode;
-              number.sms_text = statusData.sms_text || ('Your verification code is ' + smsCode);
-              changed = true;
-              
-              showToast('SMS received! Code: ' + smsCode, 'success');
-              
-              fetch('/api/numbers/' + number.id + '/code', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ code: smsCode, smsText: number.sms_text })
-              }).catch(function() {});
-              
-              if (typeof startGracePeriod === 'function') startGracePeriod(number.id);
-              
-              // ✅ FIX: Re-render to hide timer when code received
-              if (window.currentPage === 'numbers') renderMainContent();
-            } else if (smsStatus === 'expired') {
-              number.status = 'expired';
-              changed = true;
-              showToast('Number expired', 'error');
-              
-              smsbusCancelActivation(number.id).catch(function() {});
-              fetch('/api/numbers/' + number.id + '/expire', { method: 'POST' }).catch(function() {});
-              if (typeof loadBalance === 'function') loadBalance();
-              if (window.currentPage === 'numbers') renderMainContent();
-            }
-          })
-          .catch(function(err) {
-            console.warn('Status check error for', number.id, ':', err.message);
-          });
-      })(n);
-    }
-    
-    // Handle local timer expiry
-    if (timeLeft <= 0 && n.status === 'waiting') {
-      n.status = 'expired';
-      changed = true;
-      showToast('Number expired', 'error');
-      smsbusCancelActivation(n.id).catch(function() {});
-      fetch('/api/numbers/' + n.id + '/expire', { method: 'POST' }).catch(function() {});
-      if (typeof loadBalance === 'function') loadBalance();
-      if (window.currentPage === 'numbers') renderMainContent();
-    }
+  if (!window._expiredHandledIds) {
+    window._expiredHandledIds = new Set();
   }
+  
+  // ✅ FIRST PASS: Collect expired numbers (don't modify array yet)
+  var expiredNumbers = [];
+  
+  window.activeNumbers.forEach(function(n) {
+    if (n.status !== 'waiting') return;
+    
+    // Check if already handled
+    if (n._expiredHandled) return;
+    
+    var normalizedPhone = (n.phone || '').replace(/[^\d]/g, '');
+    var lockKey = normalizedPhone || n.id;
+    if (lockKey && window._expiredHandledIds.has(lockKey)) return;
+    
+    // Find timer
+    var timerEl = document.getElementById('timer-active-' + n.id) ||
+                  document.getElementById('timer-wait-' + n.id) ||
+                  document.getElementById('timer-active-' + n.provider_request_id);
+    
+    if (!timerEl) return;
+    
+    // Read time
+    var timeStr = timerEl.textContent.trim();
+    var parts = timeStr.split(':');
+    var totalSeconds = (parseInt(parts[0], 10) || 0) * 60 + (parseInt(parts[1], 10) || 0);
+    
+    if (totalSeconds <= 0) {
+      timerEl.textContent = '00:00';
+      expiredNumbers.push(n); // Queue for handling
+      return;
+    }
+    
+    // Decrement
+    totalSeconds--;
+    var newTimeStr = String(Math.floor(totalSeconds / 60)).padStart(2, '0') + ':' + 
+                     String(totalSeconds % 60).padStart(2, '0');
+    timerEl.textContent = newTimeStr;
+  });
+  
+  // ✅ SECOND PASS: Handle expired numbers (after iteration is complete)
+  expiredNumbers.forEach(function(n) {
+    if (typeof window.handleExpiredNumber === 'function') {
+      window.handleExpiredNumber(n);
+    }
+  });
 }
 
-/* ===== DYNAMIC SERVICE GRID (Matches desktop sidebar data) ===== */
+// ===== FIX: loadNumbers - Keep RECEIVED numbers during grace period =====
+// ===== FIX: loadNumbers - Check handled set BEFORE calling refund API =====
+window.loadNumbers = function() {
+  var email = (typeof getUserEmail === 'function') ? getUserEmail() : '';
+  if (!email) return Promise.resolve();
+  
+  return fetch('/api/numbers/' + email)
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (Array.isArray(data)) {
+        var now = Date.now();
+        var expiredToRefund = []; // Collect IDs that need refund
+        
+        window.activeNumbers = data.filter(function(n) {
+          var nId = n.id || n.provider_request_id;
+          var phone = (n.phone || '').replace(/[^\d]/g, '');
+          var lockKey = phone || nId;
+          
+          // ✅ CHECK HANDLED SET FIRST - if already handled, skip entirely
+          if (lockKey && window._expiredHandledIds && window._expiredHandledIds.has(lockKey)) {
+            return false; // Already processed by another code path
+          }
+          
+          // ✅ KEEP received numbers that have an active grace period
+          if (n.status === 'received' || n.status === 'success') {
+            if (nId && window.gracePeriodTimers && window.gracePeriodTimers[nId]) {
+              return true;
+            }
+            if (n.codeReceivedAt) {
+              var receivedTime = new Date(n.codeReceivedAt).getTime();
+              if (!isNaN(receivedTime) && (now - receivedTime) < 300000) {
+                return true;
+              }
+            }
+            return false;
+          }
+          
+          // ✅ Skip if not waiting status
+          if (n.status !== 'waiting') return false;
+          
+          // ✅ Calculate if already expired based on timestamp
+          var totalTime = n.total_time || n.totalTime || 300;
+          var createdAt = n.created_at;
+          
+          if (createdAt) {
+            var ts = new Date(createdAt).getTime();
+            if (isNaN(ts)) {
+              ts = new Date(createdAt.replace(' ', 'T') + 'Z').getTime();
+            }
+            
+            if (!isNaN(ts)) {
+              var elapsedSeconds = Math.floor((now - ts) / 1000);
+              if (elapsedSeconds < 0) elapsedSeconds = 0;
+              var timeLeft = totalTime - elapsedSeconds;
+              
+              // ✅ Already expired - MARK as handled and queue for refund
+              if (timeLeft <= 0) {
+                // Mark as handled FIRST
+                if (lockKey) window._expiredHandledIds.add(lockKey);
+                [n.id, n.provider_request_id, phone].filter(Boolean).forEach(function(id) {
+                  window._expiredHandledIds.add(String(id));
+                });
+                n._expiredHandled = true;
+                
+                // Queue for refund (will process AFTER filter)
+                expiredToRefund.push(nId);
+                return false;
+              }
+            }
+          }
+          
+          // ✅ Skip invalid request IDs (too short)
+          var reqId = n.provider_request_id || n.id;
+          if (reqId && String(reqId).length < 8) {
+            return false;
+          }
+          
+          return true;
+        });
+        
+        // ✅ Process refunds AFTER filter is complete (single batch)
+        expiredToRefund.forEach(function(apiId) {
+          if (apiId) {
+            fetch('/api/numbers/' + apiId + '/expire', { 
+              method: 'POST' 
+            }).catch(function() {});
+          }
+        });
+      }
+      
+      if (window.currentPage === 'numbers' && typeof renderMainContent === 'function') {
+        renderMainContent();
+      }
+    })
+    .catch(function(err) {
+      // Silent fail
+    });
+};
+
+
+/* ===== DYNAMIC SERVICE GRID ===== */
 function getDashboardServiceListHTML() {
   if (typeof services === 'undefined' || !services || services.length === 0) {
     return '<div style="padding:20px;text-align:center;color:var(--danger);font-size:14px;">Services data not loaded. Check data.js</div>';
@@ -1259,7 +1273,7 @@ function getDashboardServiceListHTML() {
     var name = s.name || 'Unknown';
     var price = (s.price || 0).toFixed(2);
     var id = s.id || 'other';
-    var availableText = (s.available !== undefined && s.available !== null) ? s.available.toLocaleString() + ' pc' : '';
+        var availableText = (s.available !== undefined && s.available !== null) ? s.available.toLocaleString() + ' pc' : '';
     var ico = getServiceIconData(name, id, s.icon);
     
     return '<div style="padding:16px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:12px;text-align:center;box-shadow:var(--shadow-sm);cursor:pointer;transition:all 0.2s;" ' +
@@ -1273,19 +1287,16 @@ function getDashboardServiceListHTML() {
       '<div style="font-size:13px;font-weight:700;color:var(--accent);">$' + price + '</div></div>';
   }).join('');
 }
-  
-  // ===== UNIFIED HISTORY SYSTEM =====
+
+// ===== UNIFIED HISTORY SYSTEM =====
 window.unifiedHistory = {
   sms: [],
   rent: [],
-  cards: [],
-  gift: [],
   loading: false,
   loaded: false,
   activeTab: 'sms'
 };
 
-// Cache history to localStorage for instant loading
 function getHistoryCacheKey() {
   var ue = (typeof getUserEmail === 'function') ? getUserEmail() : '';
   return 'unified_history_' + (ue || 'guest');
@@ -1294,10 +1305,8 @@ function getHistoryCacheKey() {
 function saveHistoryToCache() {
   try {
     var cache = {
-      sms: window.unifiedHistory.sms.slice(0, 100), // Keep last 100
+      sms: window.unifiedHistory.sms.slice(0, 100),
       rent: window.unifiedHistory.rent.slice(0, 50),
-      cards: window.unifiedHistory.cards.slice(0, 50),
-      gift: window.unifiedHistory.gift.slice(0, 50),
       timestamp: Date.now()
     };
     localStorage.setItem(getHistoryCacheKey(), JSON.stringify(cache));
@@ -1311,15 +1320,12 @@ function loadHistoryFromCache() {
       var parsed = JSON.parse(raw);
       if (parsed.sms) window.unifiedHistory.sms = parsed.sms;
       if (parsed.rent) window.unifiedHistory.rent = parsed.rent;
-      if (parsed.cards) window.unifiedHistory.cards = parsed.cards;
-      if (parsed.gift) window.unifiedHistory.gift = parsed.gift;
       return true;
     }
   } catch (e) {}
   return false;
 }
 
-// ===== REPLACE the loadUnifiedHistory function with this version =====
 window.loadUnifiedHistory = async function() {
   if (window.unifiedHistory.loading) return;
   window.unifiedHistory.loading = true;
@@ -1331,8 +1337,7 @@ window.loadUnifiedHistory = async function() {
   }
   
   var hadCacheData = window.unifiedHistory.sms.length > 0 || 
-                     window.unifiedHistory.rent.length > 0 || 
-                     window.unifiedHistory.cards.length > 0;
+                     window.unifiedHistory.rent.length > 0;
   
   try {
     var results = await Promise.allSettled([
@@ -1341,22 +1346,16 @@ window.loadUnifiedHistory = async function() {
         .catch(() => []),
       fetch('/api/rentals/' + email, { headers: { 'Accept': 'application/json' } })
         .then(r => r.ok ? r.json() : [])
-        .catch(() => []),
-      fetch('/api/cards/' + email, { headers: { 'Accept': 'application/json' } })
-        .then(r => r.ok ? r.json() : [])
         .catch(() => [])
     ]);
     
-    // Process SMS history
     var smsData = results[0].status === 'fulfilled' ? results[0].value : [];
     if (Array.isArray(smsData)) {
-      // ✅ FIX 1: Deduplicate by phone number - keep only the LATEST entry per phone
       var phoneMap = new Map();
       smsData.forEach(function(h) {
-        var phoneKey = (h.phone || '').replace(/[^\d+]/g, ''); // Normalize phone
+        var phoneKey = (h.phone || '').replace(/[^\d+]/g, '');
         var existing = phoneMap.get(phoneKey);
         
-        // If no existing entry, or this one is newer, or this one has a code (received)
         if (!existing || 
             (h.created_at && existing.created_at && new Date(h.created_at) > new Date(existing.created_at)) ||
             (h.code && !existing.code)) {
@@ -1364,11 +1363,9 @@ window.loadUnifiedHistory = async function() {
         }
       });
       
-      // Convert map back to array and map statuses
       window.unifiedHistory.sms = Array.from(phoneMap.values()).map(function(h) {
         var mappedStatus;
         
-        // ✅ FIX 2: If there's a code, ALWAYS mark as received (never show expire)
         if (h.code) {
           mappedStatus = 'received';
         } else if (h.status === 'success' || h.status === 'received' || h.status === 'code_received') {
@@ -1390,25 +1387,31 @@ window.loadUnifiedHistory = async function() {
           service_icon: h.service_icon,
           country_flag: h.country_flag,
           country_code: h.countryCode || h.country_code,
-          code: h.code, // ✅ Keep code even if status was wrong
+          code: h.code,
           cost: parseFloat(h.cost) || 0,
           status: mappedStatus,
           created_at: h.created_at,
-          // ✅ Track if this was refunded
           refunded: h.refunded || h.status === 'cancelled' || h.status === 'expired' || h.status === 'timeout'
         };
       })
-      // ✅ FIX 3: Sort by created_at DESCENDING (newest first)
       .sort(function(a, b) {
         var dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
         var dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
         return dateB - dateA;
       });
+
+      // Remove any history items that relate to cards or gift cards from the
+      // client-side unified history so they won't appear in the History UI.
+      try {
+        window.unifiedHistory.sms = window.unifiedHistory.sms.filter(function(h) {
+          var name = (h.service_name || '').toLowerCase();
+          return !(/card|gift/.test(name));
+        });
+      } catch (e) {
+        // ignore filtering errors
+      }
     }
     
-    // ... rest of the function stays the same (rent, cards processing)
-    
-    // Process Rent history
     var rentData = results[1].status === 'fulfilled' ? results[1].value : [];
     if (Array.isArray(rentData)) {
       var activeRentIds = (typeof activeRentals !== 'undefined') ? activeRentals.map(function(r) { return r.id; }) : [];
@@ -1430,27 +1433,6 @@ window.loadUnifiedHistory = async function() {
         });
     }
     
-    // Process Cards history
-    var cardData = results[2].status === 'fulfilled' ? results[2].value : [];
-    if (Array.isArray(cardData)) {
-      var cards = cardData.cards || cardData;
-      if (Array.isArray(cards)) {
-        window.unifiedHistory.cards = cards.map(function(c) {
-          return {
-            type: 'card',
-            id: c.id,
-            cardType: c.cardType,
-            fullNumber: c.fullNumber,
-            cardHolderName: c.cardHolderName,
-            balance: parseFloat(c.balance) || 0,
-            status: c.frozen ? 'frozen' : 'active',
-            created_at: c.createdAt || c.created_at
-          };
-        });
-      }
-    }
-    
-    window.unifiedHistory.gift = [];
     window.unifiedHistory.loaded = true;
     saveHistoryToCache();
     
@@ -1462,9 +1444,8 @@ window.loadUnifiedHistory = async function() {
       
       var newSmsCount = window.unifiedHistory.sms.length;
       var newRentCount = window.unifiedHistory.rent.length;
-      var newCardsCount = window.unifiedHistory.cards.length;
       
-      if (newSmsCount !== hadCacheData || newRentCount !== hadCacheData || newCardsCount !== hadCacheData) {
+      if (newSmsCount !== hadCacheData || newRentCount !== hadCacheData) {
         renderHistoryPage(document.getElementById('mainContent') || document.getElementById('appContent'));
       }
     }
@@ -1482,7 +1463,6 @@ window.switchHistoryTab = function(tab) {
   if (container) {
     renderHistoryTabContent(container);
   }
-  // Update tab button styles
   document.querySelectorAll('.history-tab-btn').forEach(function(btn) {
     if (btn.dataset.tab === tab) {
       btn.style.background = 'var(--accent)';
@@ -1508,14 +1488,6 @@ function renderHistoryTabContent(container) {
     items = window.unifiedHistory.rent;
     emptyIcon = 'fas fa-phone-alt';
     emptyText = 'No rent history yet';
-  } else if (tab === 'cards') {
-    items = window.unifiedHistory.cards;
-    emptyIcon = 'far fa-credit-card';
-    emptyText = 'No card history yet';
-  } else if (tab === 'gift') {
-    items = window.unifiedHistory.gift;
-    emptyIcon = 'fas fa-gift';
-    emptyText = 'No gift card history yet';
   }
   
   if (items.length === 0) {
@@ -1528,15 +1500,12 @@ function renderHistoryTabContent(container) {
   var html = items.map(function(item) {
     if (tab === 'sms') return renderSmsHistoryItem(item);
     if (tab === 'rent') return renderRentHistoryItem(item);
-    if (tab === 'cards') return renderCardHistoryItem(item);
-    if (tab === 'gift') return renderGiftHistoryItem(item);
     return '';
   }).join('');
   
   container.innerHTML = '<div style="display:flex;flex-direction:column;gap:10px;">' + html + '</div>';
 }
 
-// ===== REPLACE renderSmsHistoryItem with this version =====
 function renderSmsHistoryItem(h) {
   var service = (typeof services !== 'undefined') ? services.find(function(s) { return s.name.toLowerCase() === (h.service_name || '').toLowerCase(); }) : null;
   var ico = getServiceIconData(h.service_name, h.service_id, service ? service.icon : h.service_icon);
@@ -1555,24 +1524,20 @@ function renderSmsHistoryItem(h) {
     statusLabel = 'Timeout';
   }
   
-  // ✅ Don't show code for expired/timeout items
   var codeDisplay = '';
   if (h.code && (h.status === 'received' || h.status === 'success')) {
     codeDisplay = '<div style="font-family:JetBrains Mono,monospace;font-size:14px;font-weight:800;color:var(--accent);letter-spacing:2px;margin:0 8px;">' + h.code + '</div>';
   }
   
-  // ✅ FIX: Parse date correctly - handle both string and timestamp
   var dateStr = '';
   if (h.created_at) {
     var dateObj;
     if (typeof h.created_at === 'string') {
       dateObj = new Date(h.created_at);
-      // If ISO parse failed, try SQLite format
       if (isNaN(dateObj.getTime())) {
         dateObj = new Date(h.created_at.replace(' ', 'T') + 'Z');
       }
     } else if (typeof h.created_at === 'number') {
-      // If it's a Unix timestamp in seconds (not milliseconds), convert
       dateObj = new Date(h.created_at < 10000000000 ? h.created_at * 1000 : h.created_at);
     } else {
       dateObj = new Date(h.created_at);
@@ -1583,12 +1548,10 @@ function renderSmsHistoryItem(h) {
     }
   }
   
-  // ✅ Different border style based on status (NO opacity for better visibility)
   var borderStyle = h.status === 'received' ? 'border-left:3px solid var(--accent);' : 
                     h.status === 'cancelled' ? 'border-left:3px solid var(--text-muted);' : 
                     'border-left:3px solid var(--danger);';
   
-  // ✅ REMOVED: refundBadge - users don't need to see charge/refund info
   return '<div style="background:var(--bg-primary);border:1px solid var(--border);border-radius:12px;padding:12px;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;' + borderStyle + '">' +
     '<div style="display:flex;align-items:center;gap:8px;flex:1;min-width:150px;">' +
       '<div style="font-size:18px;flex-shrink:0;">' + countryFlag + '</div>' +
@@ -1641,47 +1604,7 @@ function renderRentHistoryItem(r) {
   '</div>';
 }
 
-function renderCardHistoryItem(c) {
-  var cardType = virtualCardTypes.find(function(t) { return t.id === c.cardType; });
-  var gradient = cardType ? cardType.gradient : 'linear-gradient(135deg, #1a1a2e, #16213e)';
-  var brand = cardType ? cardType.brand : 'VISA';
-  var typeName = cardType ? cardType.name : 'Virtual Card';
-  var maskedNum = c.fullNumber ? c.fullNumber.replace(/\d(?=.{4})/g, '•') : '•••• •••• •••• ••••';
-  
-  var statusColor = c.status === 'frozen' ? 'var(--warning)' : 'var(--accent)';
-  var statusLabel = c.status === 'frozen' ? 'Frozen' : 'Active';
-  
-  return '<div style="background:var(--bg-primary);border:1px solid var(--border);border-radius:12px;padding:14px;">' +
-    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">' +
-      '<div style="display:flex;align-items:center;gap:10px;">' +
-        '<div style="width:44px;height:28px;border-radius:6px;background:' + gradient + ';display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;color:rgba(255,255,255,0.9);letter-spacing:1px;">' + brand + '</div>' +
-        '<div><div style="font-size:13px;font-weight:600;">' + typeName + '</div>' +
-        '<div style="font-family:JetBrains Mono,monospace;font-size:12px;color:var(--text-muted);">' + maskedNum + '</div></div>' +
-      '</div>' +
-      '<div style="display:flex;align-items:center;gap:8px;">' +
-        '<span style="font-size:10px;padding:3px 8px;border-radius:6px;font-weight:600;background:' + statusColor + '22;color:' + statusColor + ';">' + statusLabel + '</span>' +
-        '<span style="font-size:13px;font-weight:700;color:var(--accent);">$' + (c.balance || 0).toFixed(2) + '</span>' +
-      '</div>' +
-    '</div>' +
-    (c.created_at ? '<div style="font-size:11px;color:var(--text-muted);">Created: ' + new Date(c.created_at).toLocaleDateString() + '</div>' : '') +
-  '</div>';
-}
-
-function renderGiftHistoryItem(g) {
-  return '<div style="background:var(--bg-primary);border:1px solid var(--border);border-radius:12px;padding:14px;">' +
-    '<div style="display:flex;align-items:center;justify-content:space-between;">' +
-      '<div style="display:flex;align-items:center;gap:10px;">' +
-        '<span style="font-size:24px;">🎁</span>' +
-        '<div><div style="font-size:13px;font-weight:600;">' + (g.name || 'Gift Card') + '</div>' +
-        '<div style="font-size:11px;color:var(--text-muted);">' + (g.email || '') + '</div></div>' +
-      '</div>' +
-      '<span style="font-size:13px;font-weight:700;color:var(--accent);">$' + (g.amount || 0).toFixed(2) + '</span>' +
-    '</div>' +
-  '</div>';
-}
-
 function renderHistoryPage(main) {
-  // ✅ FIX: Load from cache IMMEDIATELY before rendering
   if (!window.unifiedHistory.loaded) {
     loadHistoryFromCache();
   }
@@ -1689,8 +1612,7 @@ function renderHistoryPage(main) {
   var tab = window.unifiedHistory.activeTab;
   var smsCount = window.unifiedHistory.sms.length;
   var rentCount = window.unifiedHistory.rent.length;
-  var cardsCount = window.unifiedHistory.cards.length;
-  var totalCount = smsCount + rentCount + cardsCount;
+  var totalCount = smsCount + rentCount;
   
   var tabBtnStyle = function(t, count, icon) {
     var isActive = tab === t;
@@ -1701,8 +1623,7 @@ function renderHistoryPage(main) {
     '</button>';
   };
   
-  // ✅ FIX: Check if we have ANY cached data to show
-  var hasCachedData = smsCount > 0 || rentCount > 0 || cardsCount > 0;
+  var hasCachedData = smsCount > 0 || rentCount > 0;
   
   main.innerHTML =
     '<div class="page-header">' +
@@ -1713,34 +1634,28 @@ function renderHistoryPage(main) {
       '</div>' +
     '</div>' +
     
-    '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:20px;background:var(--bg-card);border:1px solid var(--border);border-radius:14px;padding:6px;">' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:20px;background:var(--bg-card);border:1px solid var(--border);border-radius:14px;padding:6px;">' +
       tabBtnStyle('sms', smsCount, 'fas fa-comment-dots') +
       tabBtnStyle('rent', rentCount, 'fas fa-phone-alt') +
-      tabBtnStyle('cards', cardsCount, 'far fa-credit-card') +
-      tabBtnStyle('gift', 0, 'fas fa-gift') +
     '</div>' +
     
     '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:18px;padding:20px;box-shadow:var(--shadow-sm);">' +
       '<div id="historyTabContent">' +
         (hasCachedData 
-          ? ''  // ✅ EMPTY - content will be rendered immediately below
+          ? '' 
           : '<div style="text-align:center;padding:40px 20px;"><i class="fas fa-spinner fa-spin" style="font-size:24px;color:var(--accent);display:block;margin-bottom:12px;"></i><p style="font-size:14px;color:var(--text-muted);">Loading history...</p></div>') +
       '</div>' +
     '</div>';
   
-  // ✅ FIX: Render tab content IMMEDIATELY if we have cached data
   if (hasCachedData) {
     var container = document.getElementById('historyTabContent');
     if (container) renderHistoryTabContent(container);
   }
   
-  // ✅ FIX: Load fresh data in background (no loading spinner shown)
   window.loadUnifiedHistory();
 }
-        
-     
-// ====== REFERRAL PROGRAM HELPERS (defined once) ======
 
+// ====== REFERRAL PROGRAM HELPERS ======
 window.generateRefCode = function(length) {
   length = length || 6;
   var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -1793,7 +1708,7 @@ window.requestWithdrawal = async function() {
   var amount = document.getElementById('withdrawAmount');
   
   if (!method || !method.value) { showToast('Select withdrawal method', 'error'); return; }
-  if (!address || !address.value.trim()) { showToast('Enter wallet address or gift card details', 'error'); return; }
+  if (!address || !address.value.trim()) { showToast('Enter wallet address', 'error'); return; }
   if (!amount || parseFloat(amount.value) <= 0) { showToast('Enter valid amount', 'error'); return; }
 
   var btn = document.querySelector('[onclick="requestWithdrawal()"]');
@@ -1823,7 +1738,6 @@ window.requestWithdrawal = async function() {
       address.value = '';
       amount.value = '';
       switchRefTab('withdrawals');
-      // Reload withdrawal history from backend
       loadReferralHistory();
     }
   } catch (err) {
@@ -1845,16 +1759,12 @@ function copyReferralLink() {
     .catch(function() { showToast('Failed to copy', 'error'); });
 }
 
-// ====== HELPERS TO POPULATE HISTORY FROM BACKEND ======
-
 window.loadReferralHistory = async function() {
   try {
     var res = await fetch('/api/user/' + getUserEmail());
     if (!res.ok) return;
     var data = await res.json();
 
-
-    // --- Populate withdrawal history ---
     var withdrawals = data.withdrawals || data.withdrawalHistory || [];
     var withdContainer = document.getElementById('refTabWithdrawals');
     if (withdContainer) {
@@ -1873,25 +1783,17 @@ window.loadReferralHistory = async function() {
         }).join('');
       }
     }
-  } catch (err) {
-    // Silent fail — page already shows "No referrals yet" placeholder
-  }
+  } catch (err) {}
 };
 
-// ====== REFERRAL PAGE RENDER ======
-
 async function renderSettingsPage(main) {
-  // ===== FIX: Get cached referral code IMMEDIATELY =====
   var userEmail = getUserEmail();
   var cachedRefCode = localStorage.getItem('cachedRefCode_' + userEmail) || '';
   var cachedLink = cachedRefCode ? (window.location.origin + '/?ref=' + cachedRefCode) : '';
   
-  // Render HTML skeleton WITH cached data (no "Loading...")
   main.innerHTML =
     '<div class="page-header"><h1 class="page-title">Referral Program</h1></div>' +
     '<div style="max-width:900px;margin:0 auto;display:grid;gap:22px;">' +
-
-      // 1. INTRO
       '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:18px;padding:26px;box-shadow:var(--shadow-sm);">' +
         '<h2 style="font-size:24px;font-weight:500;margin-bottom:9px;">Recommend the service and earn money</h2>' +
         '<div id="refDescShort">' +
@@ -1899,12 +1801,10 @@ async function renderSettingsPage(main) {
         '</div>' +
         '<div id="refDescFull" style="display:none;">' +
           '<p style="font-size:15px;color:var(--text-secondary);line-height:1.8;margin:0 0 12px 0;">Share your referral link with friends and earn 10% of every purchase made by users who sign up through your link. There is no limit to how much you can earn.</p>' +
-          '<p style="font-size:15px;color:var(--text-secondary);line-height:1.8;margin:0;">The bonus is automatically added to your balance. Share your referral link on social media, chat, or email to grow your earnings. You can withdraw your commissions anytime via Crypto or Gift Cards.</p>' +
+          '<p style="font-size:15px;color:var(--text-secondary);line-height:1.8;margin:0;">The bonus is automatically added to your balance. Share your referral link on social media, chat, or email to grow your earnings. You can withdraw your commissions anytime via Crypto.</p>' +
         '</div>' +
         '<button class="btn btn-secondary" style="margin-top:16px;" id="readMoreBtn" onclick="toggleReadMore()">Read more...</button>' +
       '</div>' +
-
-      // 2. STATS
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:22px;">' +
         '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:18px;padding:24px;box-shadow:var(--shadow-sm);">' +
           '<div style="font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;font-weight:500;margin-bottom:8px;">Total Commissions</div>' +
@@ -1917,8 +1817,6 @@ async function renderSettingsPage(main) {
           '<div style="font-size:13px;color:var(--text-secondary);">Total friends invited</div>' +
         '</div>' +
       '</div>' +
-
-      // 3. REFERRAL LINK - NOW SHOWS CACHED CODE IMMEDIATELY
       '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:18px;padding:24px;box-shadow:var(--shadow-sm);">' +
         '<div style="font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;font-weight:600;margin-bottom:8px;">Your REF code</div>' +
         '<div style="font-size:14px;color:var(--text-primary);line-height:1.6;margin-bottom:16px;word-break:break-all;" id="referralLink">' + 
@@ -1926,8 +1824,6 @@ async function renderSettingsPage(main) {
         '</div>' +
         '<button class="btn btn-primary" style="width:100%;justify-content:center;" onclick="copyReferralLink()"><i class="fas fa-copy" style="margin-right:6px;"></i> Copy referral link</button>' +
       '</div>' +
-
-      // 4. WITHDRAWAL FORM
       '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:18px;padding:24px;box-shadow:var(--shadow-sm);">' +
         '<h3 style="font-size:18px;font-weight:700;margin-bottom:20px;"><i class="fas fa-arrow-right-from-bracket" style="color:var(--accent);margin-right:8px;"></i>Withdraw Commissions</h3>' +
         '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">' +
@@ -1936,7 +1832,6 @@ async function renderSettingsPage(main) {
             '<select id="withdrawMethod" class="form-select" style="width:100%;padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--bg-primary);color:var(--text-primary);font-size:14px;">' +
               '<option value="">Select method...</option>' +
               '<option value="crypto">Crypto (USDT, BTC, ETH)</option>' +
-              '<option value="giftcard">Gift Card (Amazon, Apple)</option>' +
             '</select>' +
           '</div>' +
           '<div>' +
@@ -1945,13 +1840,11 @@ async function renderSettingsPage(main) {
           '</div>' +
         '</div>' +
         '<div style="margin-bottom:20px;">' +
-          '<label style="display:block;font-size:13px;font-weight:600;margin-bottom:6px;">Wallet Address / Gift Card Email</label>' +
-          '<input type="text" id="withdrawAddress" class="form-input" placeholder="Enter your wallet address or email" style="width:100%;padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--bg-primary);color:var(--text-primary);font-size:14px;">' +
+          '<label style="display:block;font-size:13px;font-weight:600;margin-bottom:6px;">Wallet Address</label>' +
+          '<input type="text" id="withdrawAddress" class="form-input" placeholder="Enter your wallet address" style="width:100%;padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--bg-primary);color:var(--text-primary);font-size:14px;">' +
         '</div>' +
         '<button class="btn btn-primary" style="width:100%;justify-content:center;padding:14px;" onclick="requestWithdrawal()"><i class="fas fa-paper-plane" style="margin-right:6px;"></i> Request Withdrawal</button>' +
       '</div>' +
-
-      // 5. HISTORY TABS
       '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:18px;padding:24px;box-shadow:var(--shadow-sm);">' +
         '<div style="display:flex;gap:10px;margin-bottom:20px;border-bottom:1px solid var(--border);padding-bottom:10px;">' +
           '<button id="tabBtnHistory" onclick="switchRefTab(\'history\')" style="flex:1;padding:10px;border-radius:8px;border:none;cursor:pointer;font-weight:600;font-size:14px;background:var(--accent);color:#fff;transition:0.2s;">Referral History</button>' +
@@ -1960,16 +1853,13 @@ async function renderSettingsPage(main) {
         '<div id="refTabHistory"><div style="text-align:center;padding:20px;color:var(--text-muted);">Loading...</div></div>' +
         '<div id="refTabWithdrawals" style="display:none;"><div style="text-align:center;padding:20px;color:var(--text-muted);">Loading...</div></div>' +
       '</div>' +
-
     '</div>';
 
-  // --- NOW FETCH REAL DATA IN BACKGROUND (silent update, no "Loading..." flash) ---
   try {
     var res = await fetch('/api/user/' + userEmail);
     if (!res.ok) throw new Error('Unable to load referral data');
     var data = await res.json();
 
-    // 1. Handle referral code
     var referralCode = data.refCode || data.referral_code || '';
     var isEmail = /[@]/.test(referralCode);
 
@@ -1998,10 +1888,8 @@ async function renderSettingsPage(main) {
       }
     }
 
-    // Cache the referral code for instant display next time
     localStorage.setItem('cachedRefCode_' + userEmail, referralCode);
 
-    // Set the referral link (silent update, no flash)
     var url = window.location.origin + '/?ref=' + referralCode;
     var linkElFinal = document.getElementById('referralLink');
     if (linkElFinal) {
@@ -2009,14 +1897,12 @@ async function renderSettingsPage(main) {
       linkElFinal.dataset.link = url;
     }
 
-    // 2. Populate stats
     var commEl = document.getElementById('refTotalCommissions');
     if (commEl) commEl.textContent = '$' + (data.totalCommissions || data.commissions || 0).toFixed(2);
 
     var countEl = document.getElementById('refCount');
     if (countEl) countEl.textContent = (data.referralCount || data.refCount || 0);
 
-    // 3. Populate history tabs from backend data
     var referrals = data.referrals || data.referralHistory || [];
     var histContainer = document.getElementById('refTabHistory');
     if (histContainer) {
@@ -2049,7 +1935,6 @@ async function renderSettingsPage(main) {
       }
     }
 
-    // Withdrawal history
     var withdrawals = data.withdrawals || data.withdrawalHistory || [];
     var withdContainer = document.getElementById('refTabWithdrawals');
     if (withdContainer) {
@@ -2070,7 +1955,6 @@ async function renderSettingsPage(main) {
     }
 
   } catch (err) {
-    // Silent fail — page already shows cached data
     console.log('Referral data load error (non-critical):', err.message);
   }
 }
@@ -2086,7 +1970,6 @@ function renderHelpPage(main) {
     'Join Telegram Channel' +
     '</a>' +
     '</div>' +
-    '<p style="font-size:14px;color:var(--text-secondary);line-height:1.6;"></p>' +
     '<p style="font-size:14px;color:var(--text-secondary);line-height:1.6;">If your purchased activations are not credited to your balance after payment, simply tap the "Restore Purchases" button in the app. If the issue continues, please contact support and provide a screenshot from your App Store or purchase history, or proof of payment from your bank for quick assistance.</p>' +
     '<p style="font-size:14px;color:var(--text-secondary);line-height:1.6;">Our service is simple and easy to use. First, order a number by selecting the service you need (for example, Tinder, WhatsApp, or any supported platform) and choose your preferred country. Once the number is issued, copy it and paste it into the registration form of the selected service. When the verification SMS is sent, it will appear directly in the app. You can then copy the confirmation code and complete your registration.</p>' +
     '<p style="font-size:14px;color:var(--text-secondary);line-height:1.6;">We offer two types of services. The first is Activations, which are short-term numbers available for approximately 20 minutes. These are ideal for quick verifications and allow you to receive one or more SMS depending on the selected service. The second option is Rent, which provides a number for up to 30 days. With this option, you can receive unlimited SMS, and by selecting "Full Rent," you can receive messages from any service, making it ideal for long-term use.</p>' +
@@ -2117,7 +2000,6 @@ function renderContactsPage(main) {
 }
 
 /* ===== Deposit / Add Funds ===== */
-
 var selectedDepositAmount = 0;
 var selectedPaymentMethod = 'usdt';
 var selectedCryptoCurrency = 'trx';
@@ -2233,31 +2115,7 @@ function selectCryptoCurrency(currencyId, el) {
   el.style.background = 'var(--accent-dim)';
   el.style.borderColor = 'var(--accent)';
   el.style.color = 'var(--accent)';
-
-  var minNote = document.getElementById('cryptoMinNote');
-  if (minNote) {
-    if (currencyId === 'USDT_TRX') {
-      minNote.textContent = 'Note that the minimum amount for USDT TRC-20 is: US$5';
-    } else {
-      minNote.textContent = 'Note that the minimum amount is: US$2';
-    }
-  }
-
   updatePayButton();
-}
-
-function getCryptoPickerHTML() {
-  return '<div id="cryptoPicker" style="margin-bottom:20px;">' +
-    '<label style="display:block;font-size:14px;font-weight:600;margin-bottom:10px;">Select cryptocurrency</label>' +
-    '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px;">' +
-    cryptoOptions.map(function(c) {
-      var isSelected = c.id === selectedCryptoCurrency;
-      return '<div class="crypto-pick" onclick="selectCryptoCurrency(\'' + c.id + '\', this)" style="padding:10px 14px;border:1px solid ' + (isSelected ? 'var(--accent)' : 'var(--border)') + ';border-radius:10px;cursor:pointer;font-size:13px;font-weight:600;background:' + (isSelected ? 'var(--accent-dim)' : 'var(--bg-primary)') + ';color:' + (isSelected ? 'var(--accent)' : 'var(--text-secondary)') + ';transition:all 0.2s;text-align:center;">' + c.name + '</div>';
-    }).join('') +
-    '</div>' +
-    '<div style="margin-top:10px;font-size:11px;color:var(--text-muted);display:flex;align-items:center;gap:6px;">' +
-    '<i class="fas fa-shield-alt" style="color:var(--accent);"></i> Payments processed secure</div>' +
-    '</div>';
 }
 
 function renderDepositPage(main) {
@@ -2265,7 +2123,6 @@ function renderDepositPage(main) {
   var cryptoPickerBlock = (selectedPaymentMethod === 'crypto') ? getCryptoPickerHTML() : '';
   var bankCurrencyBlock = (selectedPaymentMethod === 'stripe') ? getBankCurrencyPickerHTML() : '';
 
-  // Add responsive styles once
   if (!document.getElementById('depositResponsiveStyles')) {
     var style = document.createElement('style');
     style.id = 'depositResponsiveStyles';
@@ -2299,13 +2156,8 @@ function renderDepositPage(main) {
       '<h1 class="page-title" style="font-size:20px;">Top Up Balance</h1>' +
       '<div style="font-size:13px;color:var(--text-secondary);margin-top:4px;">Current balance: <strong id="depositCurrentBalance">$' + (cached ? parseFloat(cached).toFixed(2) : '0.00') + '</strong></div>' +
     '</div>' +
-
     '<div class="dep-page-wrap">' +
-
-      // ===== 3 PAYMENT CARDS (stack on mobile, 3-col on desktop) =====
       '<div class="dep-cards-grid">' +
-
-        // CARD 1: USDT TRC-20
         '<div class="stat-card dep-method-card" style="' + (selectedPaymentMethod === 'usdt' ? 'border:2px solid var(--accent);box-shadow:0 0 20px var(--accent-dim);' : '') + '" onclick="selectPaymentMethod(\'usdt\', this)">' +
           '<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">' +
             '<div style="width:40px;height:40px;border-radius:12px;background:rgba(38,161,123,0.15);display:flex;align-items:center;justify-content:center;color:#26a17b;flex-shrink:0;"><i class="fas fa-money-bill-wave" style="font-size:16px;"></i></div>' +
@@ -2314,8 +2166,6 @@ function renderDepositPage(main) {
           '<div style="font-size:12px;color:var(--text-secondary);line-height:1.6;">Send USDT via TRC20 network. Low fees, fast confirmation.</div>' +
           '<button class="btn btn-outline dep-meth dep-card-btn" data-method="usdt" onclick="event.stopPropagation();selectPaymentMethod(\'usdt\', this)" style="' + (selectedPaymentMethod === 'usdt' ? 'background:var(--accent);color:#fff;border:none;' : '') + '">Select</button>' +
         '</div>' +
-
-        // CARD 2: Bank Transfer / Cards
         '<div class="stat-card dep-method-card" style="' + (selectedPaymentMethod === 'stripe' ? 'border:2px solid var(--accent);box-shadow:0 0 20px var(--accent-dim);' : '') + '" onclick="selectPaymentMethod(\'stripe\', this)">' +
           '<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">' +
             '<div style="width:40px;height:40px;border-radius:12px;background:rgba(0,175,193,0.1);display:flex;align-items:center;justify-content:center;color:#00afc1;flex-shrink:0;"><i class="fas fa-university" style="font-size:16px;"></i></div>' +
@@ -2324,8 +2174,6 @@ function renderDepositPage(main) {
           '<div style="font-size:12px;color:var(--text-secondary);line-height:1.6;">Bank Transfer, Mobile Money, Visa, Mastercard.</div>' +
           '<button class="btn btn-outline dep-meth dep-card-btn" data-method="stripe" onclick="event.stopPropagation();selectPaymentMethod(\'stripe\', this)" style="' + (selectedPaymentMethod === 'stripe' ? 'background:var(--accent);color:#fff;border:none;' : '') + '">Select</button>' +
         '</div>' +
-
-        // CARD 3: Crypto
         '<div class="stat-card dep-method-card" style="' + (selectedPaymentMethod === 'crypto' ? 'border:2px solid var(--accent);box-shadow:0 0 20px var(--accent-dim);' : '') + '" onclick="selectPaymentMethod(\'crypto\', this)">' +
           '<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">' +
             '<div style="width:40px;height:40px;border-radius:12px;background:rgba(247,147,26,0.1);display:flex;align-items:center;justify-content:center;color:#f7931a;flex-shrink:0;"><i class="fas fa-coins" style="font-size:16px;"></i></div>' +
@@ -2334,17 +2182,12 @@ function renderDepositPage(main) {
           '<div style="font-size:12px;color:var(--text-secondary);line-height:1.6;">BTC, ETH, LTC, DOGE, BNB, SOL and more.</div>' +
           '<button class="btn btn-outline dep-meth dep-card-btn" data-method="crypto" onclick="event.stopPropagation();selectPaymentMethod(\'crypto\', this)" style="' + (selectedPaymentMethod === 'crypto' ? 'background:var(--accent);color:#fff;border:none;' : '') + '">Select</button>' +
         '</div>' +
-
       '</div>' +
-
-      // ===== AMOUNT + PAY BUTTON CARD =====
       '<div class="stat-card" style="padding:20px;">' +
         '<div style="margin-bottom:20px;">' +
           '<div id="depositMethodTitle" style="font-size:17px;font-weight:700;margin-bottom:4px;">Top Up By ' + method.title + '</div>' +
           '<div id="depositMethodSubtitle" style="font-size:13px;color:var(--text-muted);">' + method.subtitle + '</div>' +
         '</div>' +
-
-        // Quick amount buttons (2 per row on mobile)
         '<div class="dep-amount-row" style="margin-bottom:16px;">' +
           '<button class="btn btn-outline dep-amt" data-amount="5" onclick="selectDepositAmount(5,this)">$5</button>' +
           '<button class="btn btn-outline dep-amt" data-amount="10" onclick="selectDepositAmount(10,this)">$10</button>' +
@@ -2352,38 +2195,27 @@ function renderDepositPage(main) {
           '<button class="btn btn-outline dep-amt" data-amount="50" onclick="selectDepositAmount(50,this)">$50</button>' +
           '<button class="btn btn-outline dep-amt" data-amount="100" onclick="selectDepositAmount(100,this)">$100</button>' +
         '</div>' +
-
         bankCurrencyBlock +
         cryptoPickerBlock +
-
         '<div id="bankAmountPreview" style="display:none;padding:12px 14px;background:rgba(13,155,122,0.08);border:1px solid rgba(13,155,122,0.2);border-radius:10px;margin-bottom:16px;font-size:13px;color:var(--accent);"></div>' +
-
-        // Custom amount input
         '<div class="dep-input-wrap" style="margin-bottom:16px;">' +
           '<label style="display:block;font-size:13px;font-weight:600;margin-bottom:8px;">Custom amount (USD)</label>' +
           '<input type="number" id="customAmount" placeholder="US$" min="2" max="1000" style="padding:14px;border:1px solid var(--border);border-radius:10px;background:var(--bg-primary);font-size:15px;outline:none;" oninput="selectCustomAmount(this.value)">' +
         '</div>' +
-
-        // Notes
         '<div style="padding:14px;background:var(--bg-primary);border:1px solid var(--border);border-radius:12px;margin-bottom:20px;">' +
           '<ul style="margin:0;padding:0 0 0 16px;color:var(--text-secondary);font-size:13px;line-height:1.8;">' +
             '<li id="cryptoMinNote">Note that the minimum amount is: US$2</li>' +
             '<li id="depositHintNote">' + method.note + '</li>' +
           '</ul>' +
         '</div>' +
-
-        // Pay button (full width)
         '<button class="btn btn-primary" style="width:100%;padding:14px;font-size:14px;" onclick="processDeposit()" id="depositPayBtn">Pay $' + selectedDepositAmount.toFixed(2) + '</button>' +
       '</div>' +
-
-      // ===== HISTORY CARD =====
       '<div class="stat-card" style="padding:20px;">' +
         '<h3 style="font-size:15px;font-weight:600;margin-bottom:14px;display:flex;align-items:center;gap:8px;">' +
           '<i class="fas fa-clock-rotate-left" style="color:var(--accent);"></i> Recent Deposits' +
         '</h3>' +
         '<div id="depositHistoryList"><div style="text-align:center;padding:20px;color:var(--text-muted);font-size:13px;">Loading...</div></div>' +
       '</div>' +
-
     '</div>';
 
   updateDepositDetails();
@@ -2394,9 +2226,7 @@ function renderDepositPage(main) {
   }
 }
 
-// ===== ADD THIS NEW FUNCTION =====
 function initDepositPage() {
-  // Show cached balance immediately
   var email = (typeof getUserEmail === 'function') ? getUserEmail() : null;
   if (email) {
     var cached = localStorage.getItem('cachedBalance_' + email);
@@ -2405,7 +2235,6 @@ function initDepositPage() {
       if (el) el.textContent = '$' + parseFloat(cached).toFixed(2);
     }
     loadDepositHistory();
-    // Silent background refresh - user never sees loading
     fetch('/api/user/' + email).then(function(r) { return r.json(); }).then(function(d) {
       if (d.balance !== undefined) {
         var el = document.getElementById('depositCurrentBalance');
@@ -2435,8 +2264,6 @@ function updateDepositDetails() {
   if (hintNote) hintNote.textContent = method.note;
   if (minNote) {
     if (selectedPaymentMethod === 'usdt') {
-      minNote.textContent = 'Note that the minimum amount for USDT TRC-20 is: US$5';
-    } else if (selectedPaymentMethod === 'crypto' && selectedCryptoCurrency === 'USDT_TRX') {
       minNote.textContent = 'Note that the minimum amount for USDT TRC-20 is: US$5';
     } else if (selectedPaymentMethod === 'stripe') {
       minNote.textContent = 'Note that the minimum amount for card/bank payment is: US$2';
@@ -2516,7 +2343,6 @@ async function processDeposit() {
     showToast('Minimum for USDT TRC-20 is $5.00', 'error');
     return;
   }
-  // Note: USDT_TRX check removed from crypto since it's now a separate option
 
   var btn = document.getElementById('depositPayBtn');
   btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creating payment...';
@@ -2580,8 +2406,6 @@ async function processDeposit() {
   btn.disabled = false;
 }
 
-// ===== ADD THESE TWO FUNCTIONS BELOW processDeposit =====
-
 function showDepositLoadingOverlay() {
   hideDepositLoadingOverlay();
   var overlay = document.createElement('div');
@@ -2593,7 +2417,6 @@ function showDepositLoadingOverlay() {
     '<p style="color:var(--text-secondary);font-size:14px;margin:0;">Please wait, do not close this page.</p>' +
   '</div>';
   
-  // Add spinner keyframes if not already added
   if (!document.getElementById('depositSpinnerStyle')) {
     var style = document.createElement('style');
     style.id = 'depositSpinnerStyle';
@@ -2622,7 +2445,6 @@ async function loadDepositHistory() {
     window.depositHistoryData = deposits;
     container.innerHTML = deposits.map(function(d) {
       var statusColor = d.status === 'completed' ? 'var(--accent)' : d.status === 'pending' ? 'var(--warning)' : 'var(--danger)';
-      // FIX: Show declined and cancelled as distinct statuses
       var statusText = d.status === 'completed' ? 'Completed' : d.status === 'pending' ? 'Pending' : d.status === 'declined' ? 'Declined' : d.status === 'cancelled' ? 'Cancelled' : 'Failed';
       if (d.status === 'declined') statusColor = '#e65100';
       if (d.status === 'cancelled') statusColor = 'var(--text-muted)';
@@ -2636,10 +2458,6 @@ async function loadDepositHistory() {
         doge: 'DOGE',
         bnb: 'BNB',
         sol: 'SOL',
-        xrp: 'XRP',
-        usdc: 'USDC',
-        matic: 'MATIC',
-        ada: 'ADA',
         trx: 'TRX'
       };
       var methodLabel = methodLabels[d.method] || methodLabels[d.pay_currency] || d.method || 'Unknown';
@@ -2651,14 +2469,45 @@ async function loadDepositHistory() {
         '<div style="font-size:11px;color:var(--text-muted);">' + timeStr + '</div></div>' +
         '<span style="font-size:11px;padding:3px 10px;border-radius:6px;font-weight:600;background:' + bgColor + ';color:' + statusColor + ';">' + statusText + '</span></div>';
     }).join('');
-  } catch (err) { /* silent */ }
+  } catch (err) {}
 }
 
+window.loadHistory = function() {
+  var email = (typeof getUserEmail === 'function') ? getUserEmail() : '';
+  if (!email) return;
+  
+  fetch('/api/numbers/history/' + email)
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (Array.isArray(data)) {
+        window.activeNumbers = data.filter(function(n) { return n.status === 'waiting'; });
+        if (window.currentPage === 'numbers' && typeof renderMainContent === 'function') {
+          renderMainContent();
+        }
+      }
+    })
+    .catch(function(err) {
+      console.warn('Failed to load history:', err);
+    });
+};
 
-// =======================================================================
+
+window.goToPage = function(page) {
+  window.currentPage = page;
+  if (typeof renderMainContent === 'function') {
+    renderMainContent();
+  }
+  // If you have a sidebar, update it here
+  var navLinks = document.querySelectorAll('[data-page]');
+  navLinks.forEach(function(link) {
+    link.classList.remove('active');
+    if (link.dataset.page === page) {
+      link.classList.add('active');
+    }
+  });
+};
+
 // ===== BUY LOGIC =====
-// =======================================================================
-
 window.selectedBuyService = null;
 
 window.openModalById = function(serviceId) {
@@ -2691,7 +2540,7 @@ window.openModalById = function(serviceId) {
           '<img id="serviceImage" src="' + (service.image || '') + '" alt="' + service.name + '" onerror="this.parentElement.style.display=\'none\'">' +
         '</div>' +
         '<div style="display:flex;align-items:center;gap:14px;margin-bottom:20px;padding:14px;background:var(--bg-primary);border-radius:12px;border:1px solid var(--border);">' +
-         '<div style="width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:18px;background:' + mi.bg + ';color:' + mi.color + ';">' + mi.html + '</div>' +
+        '<div style="width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:18px;background:' + mi.bg + ';color:' + mi.color + ';">' + mi.html + '</div>' +
           '<div style="flex:1;">' +
             '<div style="font-size:16px;font-weight:700;">' + service.name + '</div>' +
             '<div id="modalPriceDisplay" style="font-size:13px;color:var(--accent);font-weight:600;">$' + service.price.toFixed(2) + '</div>' +
@@ -2738,7 +2587,6 @@ function filterCountries(query) {
   
   var queryLower = query.toLowerCase().trim();
   var options = select.querySelectorAll('option');
-  var visibleCount = 0;
   var firstVisible = null;
   
   for (var i = 0; i < options.length; i++) {
@@ -2748,7 +2596,6 @@ function filterCountries(query) {
   if (queryLower === '') {
     for (var i = 0; i < options.length; i++) {
       options[i].style.display = '';
-      visibleCount++;
       if (!firstVisible) firstVisible = options[i];
     }
   } else {
@@ -2765,8 +2612,7 @@ function filterCountries(query) {
       
       if (matches) {
         option.style.display = '';
-        visibleCount++;
-        if (!firstVisible) firstVisible = options[i];
+        if (!firstVisible) firstVisible = option;
       }
     }
   }
@@ -2790,7 +2636,6 @@ window.closeBuyModal = function() {
   window.selectedBuyService = null;
 };
 
-// ===== FINAL FIX: Shows "Loading..." instead of skeleton =====
 window.updateModalPrice = function() {
   var service = window.selectedBuyService;
   if (!service) return;
@@ -2801,14 +2646,12 @@ window.updateModalPrice = function() {
   var buyBtn = document.getElementById('finalBuyBtn');
   if (!priceEl) return;
 
-  // ✅ Step 1: Check cache FIRST
   var cached = (typeof priceCache !== 'undefined') ? priceCache[countryCode] : null;
   
   if (cached && Object.keys(cached).length > 0) {
     var cachedPrice = cached[service.id];
     
     if (cachedPrice !== undefined && cachedPrice !== null) {
-      // ✅ CACHED: Show price instantly
       window.modalRealPrice = cachedPrice;
       window.modalServiceAvailable = true;
       priceEl.textContent = '$' + cachedPrice.toFixed(2);
@@ -2819,7 +2662,6 @@ window.updateModalPrice = function() {
       }
       return; 
     } else {
-      // Not available
       window.modalServiceAvailable = false;
       priceEl.textContent = 'Not available';
       priceEl.style.color = 'var(--danger)';
@@ -2828,7 +2670,6 @@ window.updateModalPrice = function() {
     }
   }
 
-  // ✅ Step 2: NOT CACHED - Show "Loading..." text
   window.modalRealPrice = 0;
   window.modalServiceAvailable = false;
   priceEl.textContent = 'Loading...';
@@ -2838,7 +2679,6 @@ window.updateModalPrice = function() {
     buyBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Checking...'; 
   }
 
-  // ✅ Step 3: Fetch and reveal real price
   if (typeof fetchPricesForCountry === 'function') {
     fetchPricesForCountry(countryCode).then(function(prices) {
       if (!document.getElementById('buyModalOverlay')) return;
@@ -2871,7 +2711,6 @@ window.updateModalPrice = function() {
   }
 };
 
-// ===== REPLACE THE ENTIRE executeBuyNumber FUNCTION =====
 window.executeBuyNumber = function() {
   if (!window.selectedBuyService || !window.selectedBuyService.id) {
     showToast('Please select a service.', 'error');
@@ -2901,7 +2740,6 @@ window.executeBuyNumber = function() {
   var btn = document.getElementById('finalBuyBtn');
   if (btn) { btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...'; btn.disabled = true; }
 
-  // ===== CHECK BALANCE FIRST =====
   if (userEmail) {
     fetch('/api/user/' + userEmail)
       .then(function(res) { return res.json(); })
@@ -2931,7 +2769,6 @@ window.executeBuyNumber = function() {
   }
   
   function proceedWithPurchase() {
-    // ===== FIX: Get SMS-Bus country ID using the NOW-DEFINED function =====
     var smsBusCountryId = null;
     if (typeof getSmsBusCountryId === 'function') {
       smsBusCountryId = getSmsBusCountryId(countryCode);
@@ -2964,12 +2801,10 @@ window.executeBuyNumber = function() {
     
     if (btn) { btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Getting number...'; }
     
-    // Call SMS-Bus API through your backend proxy
     smsbusBuyNumber(smsBusCountryId, smsBusServiceCode, userEmail)
       .then(function(apiData) {
         console.log('SMS-Bus buy response:', apiData);
         
-        // Handle different response formats from SMS-Bus
         var activationId = apiData.id || apiData.activation_id || apiData.order_id || apiData.number_id;
         var phoneNumber = apiData.phone || apiData.number || apiData.phone_number || apiData.mobile_number;
         
@@ -2977,7 +2812,6 @@ window.executeBuyNumber = function() {
           throw new Error('Invalid response from SMS-Bus: ' + JSON.stringify(apiData).substring(0, 200));
         }
         
-        // Save to YOUR backend for tracking
         return fetch('/api/numbers/save', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -3010,17 +2844,14 @@ window.executeBuyNumber = function() {
           });
       })
       .then(function(result) {
-        // Update balance from backend
         if (result.balance !== undefined) {
           window.updateBalanceDisplay(result.balance);
         } else {
           if (typeof loadBalance === 'function') loadBalance();
         }
         
-        
         closeBuyModal();
         
-                // ✅ FIX: Show number INSTANTLY, then sync in background
         window.activeNumbers.unshift({
           id: result.id,
           phone: result.phone,
@@ -3037,16 +2868,13 @@ window.executeBuyNumber = function() {
           time_left: 300
         });
         
-        // Render immediately (no wait)
         if (typeof renderMainContent === 'function') renderMainContent();
         
-        // Scroll to active numbers
         setTimeout(function() {
           var activeSection = document.getElementById('activeNumbersSection');
           if (activeSection) activeSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }, 100);
         
-        // Sync from server in background (silent, no re-render)
         if (typeof loadNumbers === 'function') {
           loadNumbers().catch(function() {});
         }
@@ -3078,85 +2906,138 @@ window.executeBuyNumber = function() {
   }
 };
 
-// ===== REPLACE the polling block with this corrected version =====
+// ===== RENT PAGE HANDLER (Delegates to page-extra.js) =====
+function renderRentPage(main) {
+  // Check if page-extra.js is loaded and has the real function
+  if (typeof window.loadRentPageData === 'function') {
+    // Show loading state first
+    main.innerHTML = '<div class="page-header"><h1 class="page-title"><i class="fas fa-calendar-alt" style="color:var(--accent);margin-right:10px;"></i>Rent Number</h1>' +
+      '<p style="font-size:14px;color:var(--text-secondary);margin-top:8px;">Get a dedicated number for extended use</p></div>' +
+      '<div style="display:flex;align-items:center;justify-content:center;padding:60px 20px;">' +
+      '<i class="fas fa-spinner fa-spin" style="font-size:24px;color:var(--accent);margin-right:12px;"></i>' +
+      '<span style="color:var(--text-muted);">Loading rental page...</span></div>';
+    
+    // Call the real function from page-extra.js
+    window.loadRentPageData(main).catch(function(err) {
+      console.error('Failed to load rent page:', err);
+      main.innerHTML = '<div class="page-header"><h1 class="page-title">Rent Number</h1></div>' +
+        '<div style="padding:48px 20px;text-align:center;">' +
+        '<i class="fas fa-exclamation-triangle" style="font-size:48px;color:var(--danger);opacity:0.3;margin-bottom:16px;display:block;"></i>' +
+        '<p style="font-size:16px;color:var(--danger);margin:0;">Failed to load rental page</p>' +
+        '<p style="font-size:13px;color:var(--text-muted);margin-top:8px;">Please refresh the page or contact support</p></div>';
+    });
+  } else {
+    // page-extra.js not loaded yet - show placeholder
+    main.innerHTML = '<div class="page-header"><h1 class="page-title"><i class="fas fa-calendar-alt" style="color:var="accent);margin-right:10px;"></i>Rent Number</h1>' +
+      '<p style="font-size:14px;color:var(--text-secondary);margin-top:8px;">Get a dedicated number for extended use</p></div>' +
+      '<div style="display:flex;align-items:center;justify-content:center;padding:60px 20px;">' +
+      '<i class="fas fa-spinner fa-spin" style="font-size:24px;color:var(--accent);margin-right:12px;"></i>' +
+      '<span style="color:var(--text-muted);">Loading rental module...</span></div>';
+    
+    // Try again after a short delay
+    setTimeout(function() {
+      if (typeof window.loadRentPageData === 'function') {
+        window.loadRentPageData(main).catch(function(err) {
+          console.error('Failed to load rent page on retry:', err);
+        });
+      } else {
+        console.warn('page-extra.js still not loaded after delay');
+      }
+    }, 500);
+  }
+}
+
+// ===== SMS POLLING - Two-pass with double-check pattern =====
 if (!window._smsPollActive) {
   window._smsPollActive = true;
   
   setInterval(function() {
-    if (!window.activeNumbers || window.activeNumbers.length === 0) return;
-    var now = Date.now();
+    var currentNumbers = window.activeNumbers || [];
+    if (currentNumbers.length === 0) return;
     
-    window.activeNumbers.forEach(function(n) {
+    var now = Date.now();
+    var numbersToCheck = []; // ✅ FIRST PASS: collect numbers
+    
+    currentNumbers.forEach(function(n) {
       if (n.status !== 'waiting') return;
+      if (n._expiredHandled) return;
+      
+      var normalizedPhone = (n.phone || '').replace(/[^\d]/g, '');
+      var lockKey = normalizedPhone || n.id;
+      if (lockKey && window._expiredHandledIds && window._expiredHandledIds.has(lockKey)) {
+        return; // Already handled
+      }
       
       var realId = n.provider_request_id || n.id;
       if (!realId) return;
       
-      // Rate limit: check every 5 seconds per number
+      var idString = String(realId).trim();
+      if (idString.length < 8) {
+        // Invalid ID - mark and skip silently
+        n._expiredHandled = true;
+        if (lockKey) window._expiredHandledIds.add(lockKey);
+        return;
+      }
+      
+      // Throttle: don't check more often than every 10 seconds
       if (!n._lastCheck) n._lastCheck = 0;
-      if (now - n._lastCheck < 5000) return;
+      if (now - n._lastCheck < 10000) return;
       n._lastCheck = now;
+      
+      numbersToCheck.push(n); // Queue for API check
+    });
+    
+    // ✅ SECOND PASS: make API calls (after iteration is complete)
+    numbersToCheck.forEach(function(n) {
+      var realId = n.provider_request_id || n.id;
       
       fetch('/api/v2/status?request_id=' + realId)
         .then(function(r) { return r.json(); })
         .then(function(json) {
+          // ✅ DOUBLE-CHECK: verify not handled by another path
+          var normalizedPhone = (n.phone || '').replace(/[^\d]/g, '');
+          var lockKey = normalizedPhone || n.id;
+          if (lockKey && window._expiredHandledIds && window._expiredHandledIds.has(lockKey)) {
+            return; // Another path handled it
+          }
+          
+          // Verify still in active list and still waiting
+          var current = (window.activeNumbers || []).find(function(a) { 
+            return a.id === n.id || a.provider_request_id === n.id;
+          });
+          if (!current || current.status !== 'waiting') return;
+          
           if (json.code === 200 && json.data && String(json.data).length >= 4) {
             var code = String(json.data).trim();
-            console.log('✅ CODE RECEIVED:', code, 'for', n.phone);
+            current.status = 'received';
+            current.code = code;
+            current.sms_text = 'Your verification code is ' + code;
+            current.codeReceivedAt = new Date().toISOString();
             
-            // Update local state
-            n.status = 'received';
-            n.code = code;
-            n.sms_text = 'Your verification code is ' + code;
+            // ✅ Mark as handled to prevent expiration
+            if (lockKey) window._expiredHandledIds.add(lockKey);
             
-            // ✅ FIX: Tell backend this is SUCCESS - DO NOT refund
-            fetch('/api/numbers/' + n.id + '/code', {
+            fetch('/api/numbers/' + current.id + '/code', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ 
-                code: code, 
-                smsText: n.sms_text,
-                refund: false  // ✅ Explicitly say NO REFUND
-              })
+              body: JSON.stringify({ code: code, smsText: current.sms_text, codeReceivedAt: current.codeReceivedAt })
             }).catch(function() {});
             
-            // Start grace period
-            if (typeof startGracePeriod === 'function') startGracePeriod(n.id);
-            
-            // Show notification
+            if (typeof startGracePeriod === 'function') startGracePeriod(current.id);
             showToast('SMS received! Code: ' + code, 'success');
             
-            // Re-render if on numbers page
             if (window.currentPage === 'numbers' && typeof renderMainContent === 'function') {
               renderMainContent();
             }
           } 
-          else if (json.code === 50102) {
-            // ✅ EXPIRED - This SHOULD trigger refund
-            console.log('⏰ Number expired:', n.phone, '- Refunding $' + n.cost);
-            n.status = 'expired';
-            n.time_left = 0;
-            
-            // ✅ Tell backend to REFUND
-            fetch('/api/numbers/' + n.id + '/expire', { 
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ refund: true })  // ✅ Explicitly say REFUND
-            }).catch(function() {});
-            
-            // ✅ Reload balance to show refund
-            if (typeof loadBalance === 'function') loadBalance();
-            
-            if (window.currentPage === 'numbers' && typeof renderMainContent === 'function') {
-              renderMainContent();
-            }
+          else if (json.code === 50102 || json.code === 50103) {
+            // Use the improved handleExpiredNumber
+            window.handleExpiredNumber(current);
           }
         })
-        .catch(function(err) {
-          console.warn('Status check error for', n.id, ':', err.message);
+        .catch(function() {
+          // Silent fail
         });
     });
-  }, 1000);
-  
-  console.log('✅ SMS polling started with correct refund logic');
+  }, 5000);
 }

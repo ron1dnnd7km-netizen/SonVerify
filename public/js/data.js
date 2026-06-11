@@ -607,6 +607,7 @@ var serviceMapLoading = false;
 var serviceMapPromise = null;
 
 // Build mapping from provider's numeric ID to service code
+// Build mapping from provider's numeric ID to service code
 async function buildProviderServiceMap() {
   if (providerServiceMap) return providerServiceMap;
   if (serviceMapLoading) return serviceMapPromise;
@@ -614,7 +615,7 @@ async function buildProviderServiceMap() {
   serviceMapLoading = true;
   serviceMapPromise = fetch('/api/v2/services')
     .then(function(res) {
-      if (!res.ok) throw new Error('Failed to fetch services');
+      if (!res.ok) throw new Error('HTTP ' + res.status);
       return res.json();
     })
     .then(function(json) {
@@ -633,6 +634,7 @@ async function buildProviderServiceMap() {
         }
       }
       
+      // Fill in any missing from hardcoded map
       for (var id in knownServiceIdMap) {
         if (!map[id]) {
           map[id] = knownServiceIdMap[id];
@@ -640,13 +642,13 @@ async function buildProviderServiceMap() {
       }
       
       providerServiceMap = map;
-      console.log('✅ Built provider service map:', Object.keys(map).length, 'services');
+      console.log('✅ Built service map:', Object.keys(map).length, 'services');
       return map;
     })
-    .catch(function(err) {
-     console.warn('Failed to build service map, using hardcoded:', err ? err.message : 'Unknown error');
-     providerServiceMap = knownServiceIdMap;
-     return knownServiceIdMap;
+    .catch(function() {
+      // ✅ SILENT - Use hardcoded map, no console spam
+      providerServiceMap = knownServiceIdMap;
+      return knownServiceIdMap;
     })
     .finally(function() {
       serviceMapLoading = false;
@@ -658,24 +660,28 @@ async function buildProviderServiceMap() {
 // Call this on page load
 buildProviderServiceMap();
 
-// ===== REPLACE fetchPricesForCountry WITH THIS VERSION =====
+// ===== PRICE FETCH WITH SILENT FALLBACK =====
 function fetchPricesForCountry(countryCode) {
   var countryId = countryIdMap[countryCode];
   if (!countryId) {
-    console.warn('No country ID for:', countryCode);
     return Promise.resolve(null);
   }
   
-  // First ensure we have the service map
+  // Check cache first (valid for 5 minutes)
+  var cached = priceCache[countryCode];
+  var cacheAge = parseInt(localStorage.getItem('priceCacheAge') || '0');
+  if (cached && (Date.now() - cacheAge) < 300000) {
+    return Promise.resolve(cached);
+  }
+  
   return buildProviderServiceMap().then(function(serviceMap) {
-    return fetch(SMS_API_PRICES + '?country_id=' + countryId)
+    return fetch('/api/v2/prices?country_id=' + countryId)
       .then(function(res) { 
-        if (!res.ok) throw new Error('Price fetch failed: ' + res.status);
+        if (!res.ok) throw new Error('HTTP ' + res.status);
         return res.json(); 
       })
       .then(function(json) {
         if (json.code !== undefined && json.code !== 200) {
-          console.error('Price API error:', json);
           return null;
         }
         
@@ -683,29 +689,20 @@ function fetchPricesForCountry(countryCode) {
         var prices = {};
         
         if (typeof rawData === 'object' && rawData !== null) {
-          // Provider returns: {"1": {"cost": 15.00}, "2": {"cost": 10.50}, ...}
-          // We need to map numeric IDs to service codes
-          
           for (var numericId in rawData) {
             if (rawData.hasOwnProperty(numericId)) {
               var cost = rawData[numericId].cost || rawData[numericId].price || 0;
-              
-              // Map numeric ID to service code using the dynamic map
               var serviceCode = serviceMap[numericId];
               
               if (serviceCode) {
-                // Store with the service code as key
                 prices[serviceCode] = addProfit(cost);
               }
-              
-              // Always store with numeric ID too for direct lookups
               prices[numericId] = addProfit(cost);
             }
           }
         }
         
-        // Add fallback prices for services not in API response
-        // (services that exist in your list but not in provider's price list)
+        // Fill in missing services with calculated prices
         services.forEach(function(service) {
           if (service.price && !prices[service.id]) {
             var country = countries.find(function(c) { return c.code === countryCode; });
@@ -722,18 +719,17 @@ function fetchPricesForCountry(countryCode) {
         
         return prices;
       })
-      .catch(function(e) { 
-        console.error('Price fetch failed:', countryCode, e); 
-        // Return fallback prices from cache or hardcoded
-        var fallbackPrices = priceCache[countryCode] || {};
+      .catch(function() {
+        // ✅ SILENT - Return fallback prices, no console spam
+        var fallback = priceCache[countryCode] || {};
         services.forEach(function(service) {
-          if (!fallbackPrices[service.id] && service.price) {
+          if (!fallback[service.id] && service.price) {
             var country = countries.find(function(c) { return c.code === countryCode; });
             var multiplier = country ? (country.basePrice / 0.50) : 1;
-            fallbackPrices[service.id] = addProfit(service.price * multiplier);
+            fallback[service.id] = addProfit(service.price * multiplier);
           }
         });
-        return fallbackPrices;
+        return fallback;
       });
   });
 }

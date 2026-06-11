@@ -40,17 +40,6 @@
     }
   });
   
-  // Also suppress in console.error to keep it clean
-  var origConsoleError = console.error;
-  console.error = function() {
-    var args = Array.prototype.slice.call(arguments);
-    var msg = args.join(' ');
-    if (msg.indexOf('OneSignal') !== -1 || 
-        msg.indexOf('app ID does not match') !== -1) {
-      return; // Don't log OneSignal noise
-    }
-    origConsoleError.apply(console, arguments);
-  };
 })();
 
 /* v2 - Ultra Complete Translation */
@@ -173,7 +162,12 @@ window.addEventListener('hashchange', function() { var page = getPageFromHash();
 
 function preLoadPageData(page) {
   if (page === 'history') return loadUnifiedHistory();
-  else if (page === 'numbers') loadNumbers();
+  else if (page === 'numbers') {
+    // ✅ DON'T reload numbers - this would override received numbers
+    // Just render with current data
+    if (typeof renderMainContent === 'function') renderMainContent();
+    return Promise.resolve();
+  }
   else if (page === 'deposit') { loadBalance(); if (typeof loadDepositHistory === 'function') loadDepositHistory(); }
   else loadBalance();
   return Promise.resolve();
@@ -190,23 +184,60 @@ function toggleDropdown(sel) { var d = document.querySelector(sel); if (d) d.sty
 function closeDropdown(sel) { var d = document.querySelector(sel); if (d) d.style.display = 'none'; }
 function initKeyboard() { document.addEventListener('keydown', function(e) { if (e.key === 'Escape') { if (typeof closeModal === 'function') closeModal(); closeDropdown('.user-dropdown'); closeDropdown('#desktopLangDrop'); closeMobileSidebar(); } }); }
 
-function startIntervals() { refreshInterval = setInterval(checkExpiredNumbers, 1000); }
-function stopIntervals() { if (refreshInterval) clearInterval(refreshInterval); if (autoRefreshInterval) clearInterval(autoRefreshInterval); }
-
+// ===== TIMER UPDATER ONLY - Delegates expiration to pages.js =====
 async function checkExpiredNumbers() {
   if (!window.activeNumbers || window.activeNumbers.length === 0) return;
-  var changed = false;
+  
+  // Initialize Set if not exists (defined in pages.js)
+  if (!window._expiredHandledIds) {
+    window._expiredHandledIds = new Set();
+  }
+  
   window.activeNumbers.forEach(function(n) {
-    if (n.status !== 'waiting' && n.status !== 'received') return;
-    var timerEl = document.getElementById('timer-active-' + n.id); var waitTimer = document.getElementById('timer-wait-' + n.id); var currentTimerEl = timerEl || waitTimer;
-    if (!currentTimerEl) return;
-    var timeStr = currentTimerEl.textContent.trim(); var parts = timeStr.split(':'); var totalSeconds = (parseInt(parts[0],10)||0)*60 + (parseInt(parts[1],10)||0);
-    if (totalSeconds <= 0) { n.status = 'expired'; changed = true; currentTimerEl.textContent = '00:00'; fetch('/api/numbers/' + n.id + '/expire', { method:'POST' }).catch(function(){}); showToast(t('Number expired'), 'error'); return; }
-    totalSeconds--; var newTimeStr = String(Math.floor(totalSeconds/60)).padStart(2,'0') + ':' + String(totalSeconds%60).padStart(2,'0');
-    if (timerEl) timerEl.textContent = newTimeStr; if (waitTimer) waitTimer.textContent = newTimeStr;
+    // Skip non-waiting
+    if (n.status !== 'waiting') return;
+    
+    // Skip if already handled
+    if (n._expiredHandled) return;
+    
+    // Check global set
+    var phone = (n.phone || '').replace(/[^\d]/g, '');
+    if (window._expiredHandledIds.has(n.id) || 
+        window._expiredHandledIds.has(n.provider_request_id) ||
+        window._expiredHandledIds.has(phone)) {
+      return;
+    }
+    
+    // Find timer element
+    var timerEl = document.getElementById('timer-active-' + n.id) ||
+                  document.getElementById('timer-wait-' + n.id);
+    
+    if (!timerEl) return;
+    
+    // Read current time from display
+    var timeStr = timerEl.textContent.trim();
+    var parts = timeStr.split(':');
+    var totalSeconds = (parseInt(parts[0], 10) || 0) * 60 + (parseInt(parts[1], 10) || 0);
+    
+    // Timer expired - delegate to handleExpiredNumber (defined in pages.js)
+    if (totalSeconds <= 0) {
+      timerEl.textContent = '00:00';
+      if (typeof window.handleExpiredNumber === 'function') {
+        window.handleExpiredNumber(n);
+      }
+      return;
+    }
+    
+    // Decrement and update display
+    totalSeconds--;
+    var newTimeStr = String(Math.floor(totalSeconds / 60)).padStart(2, '0') + ':' + 
+                     String(totalSeconds % 60).padStart(2, '0');
+    timerEl.textContent = newTimeStr;
   });
-  if (changed) { window.invalidateBalanceCache(); window.invalidateNumbersCache(); await loadBalance(true); await loadNumbers(true); if (window.currentPage === 'numbers') renderMainContent(); }
 }
+
+function startIntervals() { refreshInterval = setInterval(checkExpiredNumbers, 1000); }
+function stopIntervals() { if (refreshInterval) clearInterval(refreshInterval); if (autoRefreshInterval) clearInterval(autoRefreshInterval); }
 
 function formatTime(seconds) { var m = Math.floor(seconds/60); var s = seconds%60; return String(m).padStart(2,'0')+':'+String(s).padStart(2,'0'); }
 
@@ -267,52 +298,64 @@ async function loadNumbers(forceRefresh) {
   try { 
     var r = await fetch('/api/numbers/' + getUserEmail()); 
     if (!r.ok) throw new Error(); 
-    _numbersCache.data = await r.json(); 
+    var rawData = await r.json(); 
+    
+    var filtered = rawData.filter(function(n) {
+      var nId = n.id || n.provider_request_id;
+      
+      // Keep received numbers with active grace period
+      if (n.status === 'received' || n.status === 'success') {
+        if (nId && window.gracePeriodTimers && window.gracePeriodTimers[nId]) {
+          return true;
+        }
+        if (n.codeReceivedAt) {
+          var receivedTime = new Date(n.codeReceivedAt).getTime();
+          if (!isNaN(receivedTime) && (now - receivedTime) < 300000) {
+            return true;
+          }
+        }
+        return false;
+      }
+      
+      // Skip if not waiting
+      if (n.status !== 'waiting') return false;
+      
+      // Calculate if expired
+      var totalTime = n.total_time || n.totalTime || 300;
+      var createdAt = n.created_at;
+      if (createdAt) {
+        var ts = new Date(createdAt).getTime();
+        if (isNaN(ts)) ts = new Date(createdAt.replace(' ', 'T') + 'Z').getTime();
+        if (!isNaN(ts)) {
+          var elapsed = Math.floor((now - ts) / 1000);
+          if (elapsed >= totalTime) {
+            var apiId = n.id || n.provider_request_id;
+            if (apiId) {
+              fetch('/api/numbers/' + apiId + '/expire', { method: 'POST' }).catch(function() {});
+            }
+            var phone = (n.phone || '').replace(/[^\d]/g, '');
+            if (window._expiredHandledIds) {
+              window._expiredHandledIds.add(n.id);
+              window._expiredHandledIds.add(apiId);
+              window._expiredHandledIds.add(phone);
+            }
+            return false;
+          }
+        }
+      }
+      return true;
+    });
+    
+    _numbersCache.data = filtered;
     _numbersCache.timestamp = now; 
-    window.activeNumbers = _numbersCache.data;
-    // ✅ FIX: Re-render after loading
+    window.activeNumbers = filtered;
+    
     if (window.currentPage === 'numbers') renderMainContent();
   } catch(e) { 
     window.activeNumbers = _numbersCache.data || []; 
     if (window.currentPage === 'numbers') renderMainContent();
   } finally { 
     _numbersCache.loading = false; 
-  }
-}
-
-async function loadHistory(forceRefresh) {
-  if (typeof getUserEmail !== 'function') { window.historyData = []; return; }
-  var now = Date.now();
-  if (!forceRefresh && _historyCache.timestamp && (now - _historyCache.timestamp) < CACHE_TTL) { 
-    window.historyData = _historyCache.data; 
-    // Re-render if on history page
-    if (window.currentPage === 'history') renderMainContent();
-    return; 
-  }
-  if (_historyCache.loading) {
-    // If already loading, wait and then render
-    var check = setInterval(function() { 
-      if (!_historyCache.loading) { 
-        clearInterval(check); 
-        if (window.currentPage === 'history') renderMainContent(); 
-      } 
-    }, 100);
-    return;
-  }
-  _historyCache.loading = true;
-  try { 
-    var r = await fetch('/api/history/' + getUserEmail()); 
-    if (!r.ok) throw new Error(); 
-    _historyCache.data = await r.json(); 
-    _historyCache.timestamp = now; 
-    window.historyData = _historyCache.data;
-    // ✅ FIX: Re-render after loading
-    if (window.currentPage === 'history') renderMainContent();
-  } catch(e) { 
-    window.historyData = _historyCache.data || []; 
-    if (window.currentPage === 'history') renderMainContent();
-  } finally { 
-    _historyCache.loading = false; 
   }
 }
 

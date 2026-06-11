@@ -1683,76 +1683,6 @@ div[style*="repeat(auto-fit,minmax(150px"] > div > div:last-child {
   font-weight: 500;
 }
 
-/* ===== VIRTUAL CARD PAGE ===== */
-.card-visual {
-  width: 100%;
-  max-width: 380px;
-  height: 230px;
-  border-radius: 18px;
-  padding: 28px;
-  position: relative;
-  overflow: hidden;
-  margin: 0 auto 24px;
-  box-shadow: 0 12px 40px rgba(0,0,0,0.14);
-  cursor: pointer;
-  transition: transform 0.3s ease;
-}
-
-.card-visual:hover {
-  transform: perspective(1000px) rotateY(-5deg) rotateX(3deg);
-}
-
-.card-visual.card-dark {
-  background: linear-gradient(135deg, #2a2a5a, #223870, #184080);
-  color: #fff;
-}
-
-.card-visual.card-purple {
-  background: linear-gradient(135deg, #8090f5, #9060c0);
-  color: #fff;
-}
-
-.card-visual.card-green {
-  background: linear-gradient(135deg, #14c898, #0a8868);
-  color: #fff;
-}
-
-.card-visual.card-blue {
-  background: linear-gradient(135deg, #2a5080, #3880ff);
-  color: #fff;
-}
-
-.card-visual::before {
-  content: '';
-  position: absolute;
-  top: -50%;
-  right: -50%;
-  width: 100%;
-  height: 100%;
-  background: radial-gradient(circle, rgba(255,255,255,0.15) 0%, transparent 60%);
-  pointer-events: none;
-}
-
-.card-visual::after {
-  content: '';
-  position: absolute;
-  bottom: -30%;
-  left: -30%;
-  width: 80%;
-  height: 80%;
-  background: radial-gradient(circle, rgba(255,255,255,0.08) 0%, transparent 60%);
-  pointer-events: none;
-}
-
-.card-chip {
-  width: 45px;
-  height: 34px;
-  background: linear-gradient(135deg, #d8b540, #f5d870, #d8b540);
-  border-radius: 6px;
-  margin-bottom: 24px;
-  position: relative;
-  overflow: hidden;
-}
 
 .card-chip::after {
   content: '';
@@ -1846,68 +1776,10 @@ div[style*="repeat(auto-fit,minmax(150px"] > div > div:last-child {
   color: var(--text-primary);
 }
 
-.card-actions-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 12px;
-  margin-bottom: 24px;
-}
 
-.card-action-btn {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
-  padding: 20px 16px;
-  background: var(--bg-card);
-  border: 2px solid var(--border);
-  border-radius: 14px;
-  cursor: pointer;
-  transition: all 0.2s;
-  font-family: inherit;
-  color: var(--text-primary);
-  position: relative;
-}
 
-.card-action-btn:hover {
-  border-color: var(--accent);
-  background: var(--accent-dim);
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-md);
-}
 
-.card-action-btn.selected {
-  border-color: var(--accent);
-  background: var(--selection-bg);
-  box-shadow: var(--selection-glow);
-}
 
-.card-action-btn.selected::before {
-  content: '✓';
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  width: 22px;
-  height: 22px;
-  background: var(--accent);
-  color: white;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.card-action-btn i {
-  font-size: 22px;
-  color: var(--accent);
-}
-
-.card-action-btn span {
-  font-size: 12px;
-  font-weight: 700;
-}
 
 .card-detail-row {
   display: flex;
@@ -2029,116 +1901,9 @@ div[style*="repeat(auto-fit,minmax(150px"] > div > div:last-child {
   font-weight: 500;
 }
 
-/* Available Cards */
-.available-cards-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 16px;
-  margin-bottom: 24px;
-}
 
-.available-card-item {
-  background: var(--bg-card);
-  border: 2px solid var(--border);
-  border-radius: 16px;
-  padding: 20px;
-  transition: all 0.3s;
-  cursor: pointer;
-  position: relative;
-}
 
-.available-card-item:hover {
-  border-color: var(--accent);
-  box-shadow: var(--shadow-md);
-  transform: translateY(-2px);
-}
-
-.available-card-item.selected {
-  border-color: var(--accent);
-  background: linear-gradient(180deg, rgba(13,168,130,0.10), transparent);
-  box-shadow: var(--selection-glow);
-}
-
-.available-card-item.selected::before {
-  content: '✓';
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  width: 28px;
-  height: 28px;
-  background: var(--accent);
-  color: white;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 14px;
-  font-weight: 700;
-  z-index: 2;
-}
-
-.available-card-item .card-type-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 12px;
-  border-radius: 20px;
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  margin-bottom: 12px;
-}
-
-.available-card-item .card-type-badge.visa {
-  background: rgba(32, 128, 240,0.12);
-  color: #2080f0;
-}
-
-.available-card-item .card-type-badge.mastercard {
-  background: rgba(255, 87, 34,0.12);
-  color: #ff5722;
-}
-
-.available-card-item .card-type-badge.virtual {
-  background: rgba(13, 168, 130,0.12);
-  color: var(--accent);
-}
-
-.available-card-item .card-price {
-  font-size: 24px;
-  font-weight: 800;
-  color: var(--accent);
-  margin: 12px 0 4px;
-}
-
-.available-card-item .card-price-period {
-  font-size: 12px;
-  color: var(--text-muted);
-  margin-bottom: 16px;
-  font-weight: 500;
-}
-
-.available-card-item .card-features-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-}
-
-.available-card-item .card-features-list li {
-  font-size: 12px;
-  color: var(--text-secondary);
-  padding: 5px 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: 500;
-}
-
-.available-card-item .card-features-list li i {
-  color: var(--accent);
-  font-size: 10px;
-}
+ 
 
 /* Card Status */
 .card-status {
@@ -2172,23 +1937,14 @@ div[style*="repeat(auto-fit,minmax(150px"] > div > div:last-child {
     grid-template-columns: 1fr;
   }
   
-  .card-visual {
-    height: 200px;
-    padding: 20px;
-  }
+  
   
   .card-number {
     font-size: 16px;
     letter-spacing: 2px;
   }
   
-  .card-actions-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
   
-  .available-cards-grid {
-    grid-template-columns: 1fr;
-  }
   
   .rental-item .rental-top {
     flex-direction: column;
@@ -2327,18 +2083,9 @@ div[style*="repeat(auto-fit,minmax(150px"] > div > div:last-child {
   border-color: var(--border) !important;
 }
 
-[data-theme="dark"] .card-action-btn {
-  background: var(--bg-card) !important;
-  border-color: var(--border) !important;
-}
 
 [data-theme="dark"] .card-transaction {
   background: var(--bg-primary) !important;
-}
-
-[data-theme="dark"] .available-card-item {
-  background: var(--bg-card) !important;
-  border-color: var(--border) !important;
 }
 
 [data-theme="dark"] .service-image-preview {
