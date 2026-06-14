@@ -372,7 +372,6 @@ window.startGracePeriod = function(numberId) {
     delete window.gracePeriodTimers[numberId];
     
     console.log('✅ Grace period ENDED for', numberId, '- removing now');
-    
     // Remove from active numbers array
     window.activeNumbers = window.activeNumbers.filter(function(n) { return n.id !== numberId; });
     
@@ -1163,8 +1162,50 @@ async function checkExpiredNumbers() {
   });
 }
 
-// ===== FIX: loadNumbers - Keep RECEIVED numbers during grace period =====
-// ===== FIX: loadNumbers - Check handled set BEFORE calling refund API =====
+// ====================================================================
+// ====== PERSISTENT EXPIRED TRACKING (Survives page refresh) ======
+// ====================================================================
+
+// Use localStorage to persist handled IDs
+window.getPersistedExpiredIds = function() {
+  try {
+    var data = localStorage.getItem('expiredHandledIds');
+    return data ? new Set(JSON.parse(data)) : new Set();
+  } catch (e) {
+    return new Set();
+  }
+};
+
+window.addPersistedExpiredId = function(id) {
+  var ids = window.getPersistedExpiredIds();
+  ids.add(String(id));
+  try {
+    localStorage.setItem('expiredHandledIds', JSON.stringify(Array.from(ids)));
+  } catch (e) {}
+};
+
+window.isPersistedExpired = function(id) {
+  return window.getPersistedExpiredIds().has(String(id));
+};
+
+// Clean up old entries (keep last 24 hours)
+window.cleanupPersistedExpiredIds = function() {
+  try {
+    // Simple cleanup: if too many entries, clear all (they're just for dedup)
+    var ids = window.getPersistedExpiredIds();
+    if (ids.size > 1000) {
+      localStorage.removeItem('expiredHandledIds');
+    }
+  } catch (e) {}
+};
+
+// Run cleanup on load
+window.cleanupPersistedExpiredIds();
+
+// ====================================================================
+// ====== FIXED loadNumbers - Don't re-process known expired ======
+// ====================================================================
+
 window.loadNumbers = function() {
   var email = (typeof getUserEmail === 'function') ? getUserEmail() : '';
   if (!email) return Promise.resolve();
@@ -1172,95 +1213,259 @@ window.loadNumbers = function() {
   return fetch('/api/numbers/' + email)
     .then(function(r) { return r.json(); })
     .then(function(data) {
-      if (Array.isArray(data)) {
-        var now = Date.now();
-        var expiredToRefund = []; // Collect IDs that need refund
-        
-        window.activeNumbers = data.filter(function(n) {
-          var nId = n.id || n.provider_request_id;
-          var phone = (n.phone || '').replace(/[^\d]/g, '');
-          var lockKey = phone || nId;
-          
-          // ✅ CHECK HANDLED SET FIRST - if already handled, skip entirely
-          if (lockKey && window._expiredHandledIds && window._expiredHandledIds.has(lockKey)) {
-            return false; // Already processed by another code path
-          }
-          
-          // ✅ KEEP received numbers that have an active grace period
-          if (n.status === 'received' || n.status === 'success') {
-            if (nId && window.gracePeriodTimers && window.gracePeriodTimers[nId]) {
-              return true;
-            }
-            if (n.codeReceivedAt) {
-              var receivedTime = new Date(n.codeReceivedAt).getTime();
-              if (!isNaN(receivedTime) && (now - receivedTime) < 300000) {
-                return true;
-              }
-            }
-            return false;
-          }
-          
-          // ✅ Skip if not waiting status
-          if (n.status !== 'waiting') return false;
-          
-          // ✅ Calculate if already expired based on timestamp
-          var totalTime = n.total_time || n.totalTime || 300;
-          var createdAt = n.created_at;
-          
-          if (createdAt) {
-            var ts = new Date(createdAt).getTime();
-            if (isNaN(ts)) {
-              ts = new Date(createdAt.replace(' ', 'T') + 'Z').getTime();
-            }
-            
-            if (!isNaN(ts)) {
-              var elapsedSeconds = Math.floor((now - ts) / 1000);
-              if (elapsedSeconds < 0) elapsedSeconds = 0;
-              var timeLeft = totalTime - elapsedSeconds;
-              
-              // ✅ Already expired - MARK as handled and queue for refund
-              if (timeLeft <= 0) {
-                // Mark as handled FIRST
-                if (lockKey) window._expiredHandledIds.add(lockKey);
-                [n.id, n.provider_request_id, phone].filter(Boolean).forEach(function(id) {
-                  window._expiredHandledIds.add(String(id));
-                });
-                n._expiredHandled = true;
-                
-                // Queue for refund (will process AFTER filter)
-                expiredToRefund.push(nId);
-                return false;
-              }
-            }
-          }
-          
-          // ✅ Skip invalid request IDs (too short)
-          var reqId = n.provider_request_id || n.id;
-          if (reqId && String(reqId).length < 8) {
-            return false;
-          }
-          
-          return true;
-        });
-        
-        // ✅ Process refunds AFTER filter is complete (single batch)
-        expiredToRefund.forEach(function(apiId) {
-          if (apiId) {
-            fetch('/api/numbers/' + apiId + '/expire', { 
-              method: 'POST' 
-            }).catch(function() {});
-          }
-        });
-      }
+      if (!Array.isArray(data)) return;
       
+      var now = Date.now();
+      var numbersToExpire = [];
+      
+      // Server now only returns waiting/received, so we just need to check timing
+      window.activeNumbers = data.filter(function(n) {
+        var nId = n.id || n.provider_request_id;
+        if (!nId) return false;
+        
+        // Skip if already persistently tracked as expired
+        if (window.isPersistedExpired(nId)) {
+          return false;
+        }
+        
+        // Skip received numbers (they have their own grace period logic)
+        if (n.status === 'received' || n.status === 'success') {
+          return true;
+        }
+        
+        // Only process waiting numbers
+        if (n.status !== 'waiting') return false;
+        
+        // Calculate time left
+        var totalTime = n.total_time || n.totalTime || 300;
+        var createdAt = n.created_at;
+        
+        if (createdAt) {
+          var ts = new Date(createdAt).getTime();
+          if (isNaN(ts)) {
+            ts = new Date(createdAt.replace(' ', 'T') + 'Z').getTime();
+          }
+          
+          if (!isNaN(ts)) {
+            var elapsed = Math.floor((now - ts) / 1000);
+            if (elapsed < 0) elapsed = 0;
+            var timeLeft = totalTime - elapsed;
+            
+            // Already expired - queue for refund
+            if (timeLeft <= 0) {
+              console.log('[LOAD] Found expired number:', n.phone, '- queuing for refund');
+              numbersToExpire.push({
+                id: nId,
+                dbId: n.id,
+                phone: n.phone
+              });
+              return false;
+            }
+          }
+        }
+        
+        return true;
+      });
+      
+      // Process expired numbers
+      numbersToExpire.forEach(function(item) {
+        // Mark as handled FIRST
+        window.addPersistedExpiredId(item.id);
+        
+        // Then call expire API
+        fetch('/api/numbers/' + item.id + '/expire', { 
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          if (data.success && data.refunded > 0) {
+            console.log('💰 Refund confirmed for:', item.phone, '$' + data.refunded);
+            if (data.balance !== undefined) {
+              window.updateBalanceDisplay(data.balance);
+            }
+            if (typeof loadBalance === 'function') loadBalance();
+          } else if (data.message) {
+            console.log('[LOAD] Expire result for', item.phone, ':', data.message);
+          }
+        })
+        .catch(function(err) {
+          console.error('[LOAD] Expire failed for', item.phone, ':', err.message);
+        });
+      });
+      
+      // Re-render if on numbers page
       if (window.currentPage === 'numbers' && typeof renderMainContent === 'function') {
         renderMainContent();
       }
     })
     .catch(function(err) {
-      // Silent fail
+      console.error('[LOAD] loadNumbers error:', err.message);
     });
 };
+
+// ====================================================================
+// ====== FIXED handleExpiredNumber - With proper error handling ======
+// ====================================================================
+
+window.handleExpiredNumber = function(number) {
+  if (!number) return;
+  
+  var phone = (number.phone || '').replace(/[^\d]/g, '');
+  var nId = number.id || number.provider_request_id;
+  
+  if (!nId && !phone) {
+    console.warn('[EXPIRE] No ID or phone for number');
+    return;
+  }
+  
+  var lockKey = nId || phone;
+  
+  // Check persistent storage FIRST
+  if (window.isPersistedExpired(lockKey)) {
+    console.log('[EXPIRE] Already handled (persisted):', phone || nId);
+    return;
+  }
+  
+  // Mark as handled IMMEDIATELY
+  window.addPersistedExpiredId(lockKey);
+  if (nId) window.addPersistedExpiredId(nId);
+  if (phone && phone !== String(nId)) window.addPersistedExpiredId(phone);
+  
+  // Also update in-memory set for backward compatibility
+  if (!window._expiredHandledIds) window._expiredHandledIds = new Set();
+  window._expiredHandledIds.add(lockKey);
+  if (nId) window._expiredHandledIds.add(String(nId));
+  if (phone) window._expiredHandledIds.add(phone);
+  
+  // Update local state
+  number.status = 'expired';
+  number.time_left = 0;
+  
+  // Remove from active numbers
+  window.activeNumbers = (window.activeNumbers || []).filter(function(n) {
+    var nPhone = (n.phone || '').replace(/[^\d]/g, '');
+    if (nPhone && nPhone === phone) return false;
+    if (n.id && String(n.id) === String(nId)) return false;
+    if (n.provider_request_id && String(n.provider_request_id) === String(nId)) return false;
+    return true;
+  });
+  
+  // Call expire API with PROPER error handling
+  var apiId = nId || phone;
+  
+  fetch('/api/numbers/' + apiId + '/expire', { 
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' }
+  })
+  .then(function(response) {
+    if (!response.ok) {
+      throw new Error('HTTP ' + response.status);
+    }
+    return response.json();
+  })
+  .then(function(data) {
+    console.log('[EXPIRE] API response for', phone || apiId, ':', JSON.stringify(data));
+    
+    if (data.success && data.refunded > 0) {
+      console.log('💰 Refund confirmed: $' + data.refunded + ' to balance');
+      
+      // Update balance display
+      if (data.balance !== undefined) {
+        window.updateBalanceDisplay(data.balance);
+      } else {
+        if (typeof loadBalance === 'function') loadBalance();
+      }
+      
+      // Show toast
+      if (typeof showToast === 'function') {
+        showToast('Number expired - $' + data.refunded.toFixed(2) + ' refunded', 'info');
+      }
+    } else if (data.message && data.message.indexOf('code was received') !== -1) {
+      // Code was received, no refund - this is correct
+      console.log('[EXPIRE] No refund - code was received');
+    } else if (data.message && data.message.indexOf('Already refunded') !== -1) {
+      // Already refunded - this is correct
+      console.log('[EXPIRE] Already refunded');
+    } else {
+      console.log('[EXPIRE] Result:', data.message);
+    }
+  })
+  .catch(function(err) {
+    console.error('[EXPIRE] API ERROR for', phone || apiId, ':', err.message);
+    
+    // Don't show error to user - the persistent tracking will prevent double-processing
+    // The next loadNumbers call will retry if needed
+  });
+  
+  // Re-render
+  if (!window._pendingRender) {
+    window._pendingRender = true;
+    requestAnimationFrame(function() {
+      window._pendingRender = false;
+      if (window.currentPage === 'numbers' && typeof renderMainContent === 'function') {
+        renderMainContent();
+      }
+    });
+  }
+};
+
+// ====================================================================
+// ====== FIXED checkExpiredNumbers - Timer-based expiration ======
+// ====================================================================
+
+async function checkExpiredNumbers() {
+  if (!window.activeNumbers || window.activeNumbers.length === 0) return;
+  
+  if (!window._expiredHandledIds) {
+    window._expiredHandledIds = new Set();
+  }
+  
+  var expiredNumbers = [];
+  
+  // First pass: check timers
+  window.activeNumbers.forEach(function(n) {
+    if (n.status !== 'waiting') return;
+    
+    // Check if already handled
+    var nId = n.id || n.provider_request_id;
+    var phone = (n.phone || '').replace(/[^\d]/g, '');
+    var lockKey = nId || phone;
+    
+    if (window._expiredHandledIds.has(lockKey) || window.isPersistedExpired(lockKey)) {
+      return;
+    }
+    
+    // Find timer element
+    var timerEl = document.getElementById('timer-active-' + n.id) ||
+                  document.getElementById('timer-wait-' + n.id);
+    
+    if (!timerEl) return;
+    
+    // Read and decrement time
+    var timeStr = timerEl.textContent.trim();
+    var parts = timeStr.split(':');
+    var totalSeconds = (parseInt(parts[0], 10) || 0) * 60 + (parseInt(parts[1], 10) || 0);
+    
+    if (totalSeconds <= 0) {
+      timerEl.textContent = '00:00';
+      expiredNumbers.push(n);
+      return;
+    }
+    
+    // Decrement
+    totalSeconds--;
+    timerEl.textContent = String(Math.floor(totalSeconds / 60)).padStart(2, '0') + ':' + 
+                          String(totalSeconds % 60).padStart(2, '0');
+  });
+  
+  // Second pass: handle expired
+  expiredNumbers.forEach(function(n) {
+    if (typeof window.handleExpiredNumber === 'function') {
+      window.handleExpiredNumber(n);
+    }
+  });
+}
 
 
 /* ===== DYNAMIC SERVICE GRID ===== */

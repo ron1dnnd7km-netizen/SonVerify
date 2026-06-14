@@ -455,66 +455,62 @@ app.post('/api/deposit/plisio-callback', async function(req, res) {
 });
 
 // ====================================================================
-// ====== NUMBERS ======
+// ====== NUMBERS - AUTO-EXPIRE AND REFUND ON LOAD ======
 // ====================================================================
 
 app.get('/api/numbers/:email', async function(req, res) {
-  var rows = await db.prepare('SELECT * FROM numbers WHERE email = $1 ORDER BY created_at DESC').all(req.params.email);
-  res.json(rows);
-});
-
-app.post('/api/numbers/request', async function(req, res) {
-  var email = req.body.email;
-  var serviceName = req.body.serviceName;
-  var serviceId = req.body.serviceId;
-  var countryCode = req.body.countryCode;
-  var cost = req.body.cost;
-
-  var user = await db.prepare('SELECT balance FROM users WHERE email = $1').get(email);
-  if (!user) return res.status(404).json({ error: 'User not found' });
-  if (user.balance < cost) return res.status(400).json({ error: 'Insufficient balance' });
-
-  var useRealProvider = process.env.SMS_API_KEY && process.env.SMS_API_KEY !== 'YOUR_API_KEY_HERE';
-  var realPhone = null;
-  var providerRequestId = null;
-
-  if (useRealProvider) {
-    try {
-      var provider = require('./sms-provider');
-      var serviceCode = provider.getServiceCode(serviceName, serviceId);
-      if (!serviceCode) return res.status(400).json({ error: 'This service is currently not supported by our provider.' });
-
-      var countryCodeForProvider = provider.getCountryCode(countryCode);
-      if (!countryCodeForProvider) return res.status(400).json({ error: 'This country is currently not supported by our provider.' });
-
-      var result = await provider.getNumber(serviceCode, countryCodeForProvider);
-      if (!result.success) return res.status(400).json({ error: result.error || 'No numbers available. Try a different country.' });
-      realPhone = result.phone;
-      providerRequestId = result.requestId;
-    } catch (err) {
-      console.error('SMS Provider Error:', err.message);
-      return res.status(500).json({ error: 'Failed to get number from provider: ' + err.message });
+  try {
+    var email = req.params.email;
+    
+    // ✅ AUTO-EXPIRE: Find all waiting numbers past their time
+    var expiredNumbers = await db.prepare(
+      "SELECT * FROM numbers " +
+      "WHERE email = $1 AND status = 'waiting' " +
+      "AND (code IS NULL OR code = '' OR LENGTH(TRIM(code)) = 0) " +
+      "AND created_at < (CURRENT_TIMESTAMP - INTERVAL '1 second' * total_time)"
+    ).all(email);
+    
+    // Process each expired number
+    for (var i = 0; i < expiredNumbers.length; i++) {
+      var exp = expiredNumbers[i];
+      var cost = parseFloat(exp.cost) || 0;
+      
+      console.log('[AUTO-EXPIRE] Processing:', exp.phone, 'cost:', cost);
+      
+      // Update status
+      await db.prepare("UPDATE numbers SET status = 'expired', time_left = 0 WHERE id = $1").run(exp.id);
+      
+      // Update history
+      try {
+        await db.prepare(
+          "UPDATE history SET status = 'failed' WHERE email = $1 AND phone = $2 AND status = 'pending'"
+        ).run(exp.email, exp.phone);
+      } catch (e) {}
+      
+      // Refund if cost > 0
+      if (cost > 0) {
+        try {
+          await db.prepare('UPDATE users SET balance = balance + $1 WHERE email = $2').run(cost, exp.email);
+          console.log('💰 Auto-refunded $' + cost + ' to ' + exp.email + ' for: ' + exp.phone);
+        } catch (refundErr) {
+          console.error('[AUTO-EXPIRE] Refund error:', refundErr.message);
+        }
+      }
     }
-  } else {
-    var country = countries.find(function(c) { return c.code === countryCode; });
-    if (!country) return res.status(400).json({ error: 'Invalid country code' });
-    realPhone = generatePhone(country.prefix);
+    
+    // Return only active numbers (waiting or received)
+    var rows = await db.prepare(
+      "SELECT * FROM numbers " +
+      "WHERE email = $1 AND status IN ('waiting', 'received') " +
+      "ORDER BY created_at DESC"
+    ).all(email);
+    
+    res.json(rows);
+    
+  } catch (err) {
+    console.error('Numbers API error:', err.message);
+    res.status(500).json({ error: err.message });
   }
-
-  await db.prepare('UPDATE users SET balance = balance - $1 WHERE email = $2').run(cost, email);
-
-  var insertResult = await db.prepare(
-    'INSERT INTO numbers (email, service_name, service_id, phone, status, time_left, total_time, cost, provider_request_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id'
-  ).run(email, serviceName, serviceId, realPhone, 'waiting', 600, 600, cost, providerRequestId);
-  var numberId = insertResult.rows[0].id;
-
-  await db.prepare("INSERT INTO history (email, service_name, phone, code, status, cost) VALUES ($1, $2, $3, NULL, 'pending', $4)").run(email, serviceName, realPhone, cost);
-
-  if (useRealProvider && providerRequestId) {
-    startPolling(numberId, providerRequestId, serviceName);
-  }
-
-  res.json({ id: numberId, phone: realPhone, status: 'waiting', timeLeft: 600, totalTime: 600, cost: cost, balance: user.balance - cost });
 });
 
 app.delete('/api/numbers/:id', async function(req, res) {
@@ -534,80 +530,187 @@ app.delete('/api/numbers/:id', async function(req, res) {
 });
 
 // ====================================================================
-// ====== NUMBER EXPIRED - REFUND BALANCE ======
+// ====== NUMBER EXPIRED - SIMPLIFIED ROBUST VERSION ======
 // ====================================================================
 
 app.post('/api/numbers/:id/expire', async function(req, res) {
   try {
-    var num = await db.prepare('SELECT * FROM numbers WHERE id = $1 OR provider_request_id = $1').get(req.params.id);
+    var inputId = req.params.id;
+    console.log('[EXPIRE] Request for ID:', inputId);
+    
+    // Find number - try by ID, then by provider_request_id, then by phone
+    var num = null;
+    
+    // Try as numeric ID first
+    if (/^\d+$/.test(inputId) && inputId.length < 10) {
+      num = await db.prepare('SELECT * FROM numbers WHERE id = $1').get(parseInt(inputId));
+    }
+    
+    // Try by provider_request_id
+    if (!num) {
+      num = await db.prepare('SELECT * FROM numbers WHERE provider_request_id = $1').get(inputId);
+    }
+    
+    // Try by phone (remove + and spaces)
+    if (!num) {
+      var cleanPhone = inputId.replace(/[\+\s\-]/g, '');
+      num = await db.prepare("SELECT * FROM numbers WHERE REPLACE(REPLACE(phone, '+', ''), ' ', '') LIKE '%' || $1 || '%' AND status = 'waiting'").get(cleanPhone);
+    }
     
     if (!num) {
+      console.log('[EXPIRE] Number not found for:', inputId);
       return res.status(404).json({ error: 'Number not found' });
     }
 
-    // ✅ FIX: Don't process if already expired or received
-    if (num.status === 'expired') {
-      console.log('[EXPIRE] Already expired, skipping:', num.phone);
-      return res.json({ success: true, message: 'Already expired' });
+    console.log('[EXPIRE] Found:', num.phone, 'DB ID:', num.id, 'Status:', num.status, 'Code:', num.code);
+
+    // ✅ CHECK: Already in terminal status?
+    if (num.status === 'expired' || num.status === 'cancelled') {
+      console.log('[EXPIRE] Already in terminal status:', num.status);
+      return res.json({ success: true, message: 'Already ' + num.status, refunded: 0 });
     }
-    
-    if (num.status === 'received' && num.code) {
-      console.log('[EXPIRE] Code was received, NO refund for:', num.phone);
-      await db.prepare("UPDATE numbers SET status = 'expired' WHERE id = $1").run(num.id);
+
+    // ✅ CHECK: Code was received? (NO REFUND)
+    if (num.code && String(num.code).trim() !== '') {
+      console.log('[EXPIRE] Code exists, NO refund. Code:', num.code);
+      await db.prepare("UPDATE numbers SET status = 'expired', time_left = 0 WHERE id = $1").run(num.id);
       return res.json({ success: true, message: 'No refund - code was received', refunded: 0 });
     }
 
-    // Update number status to expired
-    await db.prepare("UPDATE numbers SET status = 'expired', time_left = 0 WHERE id = $1").run(num.id);
-
-    // ✅ FIX: UPDATE existing pending history entry instead of inserting new one
-    var historyUpdate = await db.prepare(
-      "UPDATE history SET status = 'failed' WHERE email = $1 AND phone = $2 AND status = 'pending' RETURNING id"
-    ).run(num.email, num.phone);
-    
-    // If no pending entry, insert new one (fallback for edge cases)
-    if (!historyUpdate.rows || historyUpdate.rows.length === 0) {
-      console.log('[EXPIRE] No pending history found, inserting new for:', num.phone);
-      await db.prepare(
-        "INSERT INTO history (email, service_name, phone, code, status, cost) VALUES ($1, $2, $3, NULL, 'failed', $4)"
-      ).run(num.email, num.service_name, num.phone, num.cost);
+    // ✅ CHECK: Status is not 'waiting'? (shouldn't refund received/other statuses)
+    if (num.status !== 'waiting') {
+      console.log('[EXPIRE] Not in waiting status:', num.status);
+      await db.prepare("UPDATE numbers SET status = 'expired', time_left = 0 WHERE id = $1").run(num.id);
+      return res.json({ success: true, message: 'Not in waiting status: ' + num.status, refunded: 0 });
     }
 
-    // ✅ REFUND - Number expired without code
-    var cost = parseFloat(num.cost) || 0;
-    var newBalance = null;
+    // ✅ CHECK: Any successful history entry? (code might have been saved to history but not to numbers table)
+    var successHistory = await db.prepare(
+      "SELECT id FROM history WHERE email = $1 AND phone = $2 AND status = 'success' AND code IS NOT NULL AND code != ''"
+    ).get(num.email, num.phone);
     
+    if (successHistory) {
+      console.log('[EXPIRE] Success history found, NO refund');
+      await db.prepare("UPDATE numbers SET status = 'expired', time_left = 0 WHERE id = $1").run(num.id);
+      return res.json({ success: true, message: 'No refund - code found in history', refunded: 0 });
+    }
+
+    // ✅ ALL CHECKS PASSED - PROCEED WITH REFUND
+    
+    var cost = parseFloat(num.cost) || 0;
+    var refunded = 0;
+    var newBalance = null;
+
+    // Update number status
+    await db.prepare("UPDATE numbers SET status = 'expired', time_left = 0 WHERE id = $1").run(num.id);
+    console.log('[EXPIRE] Status updated to expired for:', num.phone);
+
+    // Update history to failed
+    try {
+      await db.prepare(
+        "UPDATE history SET status = 'failed' WHERE email = $1 AND phone = $2 AND status = 'pending'"
+      ).run(num.email, num.phone);
+    } catch (histErr) {
+      console.log('[EXPIRE] History update note:', histErr.message);
+    }
+
+    // Refund the user
     if (cost > 0) {
-      await db.prepare('UPDATE users SET balance = balance + $1 WHERE email = $2').run(cost, num.email);
-      
-      var user = await db.prepare('SELECT balance FROM users WHERE email = $1').get(num.email);
-      newBalance = user ? parseFloat(user.balance) : null;
-      
-      console.log('💰 Refunded $' + cost + ' to ' + num.email + ' for expired number ' + num.phone);
+      try {
+        await db.prepare('UPDATE users SET balance = balance + $1 WHERE email = $2').run(cost, num.email);
+        
+        var user = await db.prepare('SELECT balance FROM users WHERE email = $1').get(num.email);
+        newBalance = user ? parseFloat(user.balance) : null;
+        refunded = cost;
+        
+        console.log('💰 REFUNDED $' + cost + ' to ' + num.email + ' for: ' + num.phone);
+      } catch (refundErr) {
+        console.error('[EXPIRE] Refund error:', refundErr.message);
+      }
     }
 
     res.json({ 
       success: true, 
       message: 'Number expired, balance refunded',
       balance: newBalance,
-      refunded: cost
+      refunded: refunded
     });
+
   } catch (err) {
-    console.error('Expire error:', err.message);
-    res.status(500).json({ error: err.message });
+    console.error('[EXPIRE] FATAL ERROR:', err.message, err.stack);
+    res.status(500).json({ error: 'Server error: ' + err.message });
   }
 });
 
-app.post('/api/numbers/:id/receive', async function(req, res) {
-  var code = req.body.code;
-  var smsText = req.body.smsText;
-  var num = await db.prepare("SELECT * FROM numbers WHERE id = $1 AND status = 'waiting'").get(req.params.id);
-  if (!num) return res.status(404).json({ error: 'Number not found or not waiting' });
+// ====================================================================
+// ====== NUMBER CODE RECEIVED - MARK AS NO REFUND NEEDED ======
+// ====================================================================
 
-  await db.prepare('UPDATE numbers SET status = $1, code = $2, sms_text = $3 WHERE id = $4').run('received', code, smsText, req.params.id);
-  await db.prepare("INSERT INTO history (email, service_name, phone, code, status, cost) VALUES ($1, $2, $3, $4, 'success', $5)").run(num.email, num.service_name, num.phone, code, num.cost);
+app.post('/api/numbers/:id/code', async function(req, res) {
+  try {
+    var code = req.body.code;
+    var smsText = req.body.smsText;
+    
+    // Find number
+    var num = await db.prepare('SELECT * FROM numbers WHERE provider_request_id = $1').get(req.params.id);
+    
+    if (!num) {
+      num = await db.prepare('SELECT * FROM numbers WHERE id = $1').get(req.params.id);
+    }
+    
+    if (!num) {
+      return res.status(404).json({ error: 'Number not found' });
+    }
 
-  res.json({ message: 'Code received', code: code });
+    console.log('[CODE] Processing:', num.phone, 'code:', code, 'current status:', num.status);
+
+    // ✅ Already have a code? Just return success
+    if (num.code && num.code.trim() !== '') {
+      console.log('[CODE] Already has code:', num.code, 'for:', num.phone);
+      return res.json({ success: true, message: 'Already processed', code: num.code });
+    }
+
+    // ✅ Already expired? Check if refund was given
+    if (num.status === 'expired') {
+      var refund = await db.prepare('SELECT id FROM number_refunds WHERE number_id = $1').get(num.id);
+      if (refund) {
+        console.log('[CODE] Already expired AND refunded for:', num.phone, '- code came too late');
+        // Code came too late - refund was already processed
+        return res.json({ 
+          success: false, 
+          message: 'Number expired and refunded before code arrived',
+          code: code 
+        });
+      }
+    }
+
+    // ✅ Update the number with the code
+    await db.prepare(
+      "UPDATE numbers SET status = 'received', code = $1, sms_text = $2 WHERE id = $3"
+    ).run(code, smsText, num.id);
+
+    // ✅ Update history - change any pending/failed to success
+    var historyResult = await db.prepare(
+      "UPDATE history SET code = $1, status = 'success' " +
+      "WHERE email = $2 AND phone = $3 AND status IN ('pending', 'failed') " +
+      "RETURNING id"
+    ).run(code, num.email, num.phone);
+    
+    if (!historyResult.rows || historyResult.rows.length === 0) {
+      // Insert new history entry
+      await db.prepare(
+        "INSERT INTO history (email, service_name, phone, code, status, cost) VALUES ($1, $2, $3, $4, 'success', $5)"
+      ).run(num.email, num.service_name, num.phone, code, num.cost);
+    }
+
+    console.log('✅ Code saved:', code, 'for', num.phone, '- NO REFUND');
+
+    res.json({ success: true, code: code });
+
+  } catch (err) {
+    console.error('[CODE] ERROR:', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ====================================================================
@@ -663,58 +766,6 @@ app.post('/api/numbers/save', async function(req, res) {
 
   } catch (err) {
     console.error('Save number error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ====================================================================
-// ====== NUMBER CODE RECEIVED - NO REFUND ======
-// ====================================================================
-
-app.post('/api/numbers/:id/code', async function(req, res) {
-  try {
-    var code = req.body.code;
-    var smsText = req.body.smsText;
-    
-    // Try by provider_request_id first (SMS-Bus uses this)
-    var num = await db.prepare('SELECT * FROM numbers WHERE provider_request_id = $1').get(req.params.id);
-    
-    if (!num) {
-      // Try by regular id
-      num = await db.prepare('SELECT * FROM numbers WHERE id = $1').get(req.params.id);
-    }
-    
-    if (!num) return res.status(404).json({ error: 'Number not found' });
-    
-    // ✅ FIX: Don't update if already received (prevent duplicate processing)
-    if (num.status === 'received' && num.code) {
-      console.log('[CODE] Already received, skipping:', num.phone);
-      return res.json({ success: true, message: 'Already processed' });
-    }
-
-    // Update number status to received
-    await db.prepare('UPDATE numbers SET status = $1, code = $2, sms_text = $3 WHERE id = $4')
-      .run('received', code, smsText, num.id);
-
-    // ✅ FIX: UPDATE existing history entry instead of inserting new one
-    var historyUpdate = await db.prepare(
-      "UPDATE history SET code = $1, status = 'success' WHERE email = $2 AND phone = $3 AND status = 'pending' RETURNING id"
-    ).run(code, num.email, num.phone);
-    
-    // If no pending entry found, insert new one (fallback)
-    if (!historyUpdate.rows || historyUpdate.rows.length === 0) {
-      console.log('[CODE] No pending history found, inserting new for:', num.phone);
-      await db.prepare(
-        "INSERT INTO history (email, service_name, phone, code, status, cost) VALUES ($1, $2, $3, $4, 'success', $5)"
-      ).run(num.email, num.service_name, num.phone, code, num.cost);
-    }
-
-    // ✅ NO REFUND - User got their code, balance stays deducted
-    console.log('✅ Code received:', code, 'for', num.phone, '- NO REFUND');
-
-    res.json({ success: true });
-  } catch (err) {
-    console.error('Code save error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -1368,64 +1419,115 @@ const SMS_BUS_TOKEN = process.env.SMS_API_KEY || 'd4a7951968ed4e59a647a0ac1d1af6
 var _SMS_TOKEN = SMS_BUS_TOKEN;
 
 // ====================================================================
-// ====== CANCEL NUMBER - REFUND IF NO CODE RECEIVED ======
+// ====== CANCEL NUMBER - SIMPLIFIED ROBUST VERSION ======
 // ====================================================================
 
 app.post('/api/numbers/:id/cancel', async function(req, res) {
   try {
-    var num = await db.prepare('SELECT * FROM numbers WHERE id = $1 OR provider_request_id = $1').get(req.params.id);
+    var inputId = req.params.id;
+    console.log('[CANCEL] Request for ID:', inputId);
+    
+    // Find number
+    var num = null;
+    
+    if (/^\d+$/.test(inputId) && inputId.length < 10) {
+      num = await db.prepare('SELECT * FROM numbers WHERE id = $1').get(parseInt(inputId));
+    }
+    
+    if (!num) {
+      num = await db.prepare('SELECT * FROM numbers WHERE provider_request_id = $1').get(inputId);
+    }
+    
+    if (!num) {
+      var cleanPhone = inputId.replace(/[\+\s\-]/g, '');
+      num = await db.prepare("SELECT * FROM numbers WHERE REPLACE(REPLACE(phone, '+', ''), ' ', '') LIKE '%' || $1 || '%' AND status = 'waiting'").get(cleanPhone);
+    }
     
     if (!num) {
       return res.status(404).json({ error: 'Number not found' });
     }
 
-    // ✅ FIX: If code was already received, NO refund
-    if (num.status === 'received' && num.code) {
-      console.log('[CANCEL] Code was received, NO refund for:', num.phone);
+    console.log('[CANCEL] Found:', num.phone, 'DB ID:', num.id, 'Status:', num.status);
+
+    // Already in terminal status?
+    if (num.status === 'expired' || num.status === 'cancelled') {
+      return res.json({ success: true, message: 'Already ' + num.status, refunded: 0 });
+    }
+
+    // Code was received?
+    if (num.code && String(num.code).trim() !== '') {
       await db.prepare("UPDATE numbers SET status = 'cancelled' WHERE id = $1").run(num.id);
-      
-      // Update history
+      return res.json({ success: true, message: 'No refund - code already received', refunded: 0 });
+    }
+
+    // Not in waiting status?
+    if (num.status !== 'waiting') {
+      await db.prepare("UPDATE numbers SET status = 'cancelled' WHERE id = $1").run(num.id);
+      return res.json({ success: true, message: 'Not in waiting status: ' + num.status, refunded: 0 });
+    }
+
+    // Check history
+    var successHistory = await db.prepare(
+      "SELECT id FROM history WHERE email = $1 AND phone = $2 AND status = 'success' AND code IS NOT NULL AND code != ''"
+    ).get(num.email, num.phone);
+    
+    if (successHistory) {
+      await db.prepare("UPDATE numbers SET status = 'cancelled' WHERE id = $1").run(num.id);
+      return res.json({ success: true, message: 'No refund - code found in history', refunded: 0 });
+    }
+
+    // PROCEED WITH CANCEL AND REFUND
+    var cost = parseFloat(num.cost) || 0;
+    var refunded = 0;
+    var newBalance = null;
+
+    // Cancel with provider
+    if (num.provider_request_id) {
+      try { 
+        var provider = require('./sms-provider'); 
+        await provider.cancel(num.provider_request_id); 
+      } catch (err) { 
+        console.log('[CANCEL] Provider cancel note:', err.message); 
+      }
+    }
+
+    // Update status
+    await db.prepare("UPDATE numbers SET status = 'cancelled' WHERE id = $1").run(num.id);
+
+    // Update history
+    try {
       await db.prepare(
         "UPDATE history SET status = 'cancelled' WHERE email = $1 AND phone = $2 AND status = 'pending'"
       ).run(num.email, num.phone);
-      
-      return res.json({ 
-        success: true, 
-        message: 'Cancelled (no refund - code already received)',
-        refunded: 0 
-      });
+    } catch (histErr) {
+      console.log('[CANCEL] History update note:', histErr.message);
     }
 
-    // Update number status to cancelled
-    await db.prepare("UPDATE numbers SET status = 'cancelled' WHERE id = $1").run(num.id);
-
-    // ✅ FIX: UPDATE existing pending history entry
-    await db.prepare(
-      "UPDATE history SET status = 'cancelled' WHERE email = $1 AND phone = $2 AND status = 'pending'"
-    ).run(num.email, num.phone);
-
-    // ✅ REFUND - Number cancelled without code
-    var cost = parseFloat(num.cost) || 0;
-    var newBalance = null;
-    
+    // Refund
     if (cost > 0) {
-      await db.prepare('UPDATE users SET balance = balance + $1 WHERE email = $2').run(cost, num.email);
-      
-      var user = await db.prepare('SELECT balance FROM users WHERE email = $1').get(num.email);
-      newBalance = user ? parseFloat(user.balance) : null;
-      
-      console.log('💰 Refunded $' + cost + ' to ' + num.email + ' for cancelled number ' + num.phone);
+      try {
+        await db.prepare('UPDATE users SET balance = balance + $1 WHERE email = $2').run(cost, num.email);
+        
+        var user = await db.prepare('SELECT balance FROM users WHERE email = $1').get(num.email);
+        newBalance = user ? parseFloat(user.balance) : null;
+        refunded = cost;
+        
+        console.log('💰 REFUNDED $' + cost + ' to ' + num.email + ' for cancelled: ' + num.phone);
+      } catch (refundErr) {
+        console.error('[CANCEL] Refund error:', refundErr.message);
+      }
     }
 
     res.json({ 
       success: true, 
       message: 'Number cancelled, balance refunded',
       balance: newBalance,
-      refunded: cost
+      refunded: refunded
     });
+
   } catch (err) {
-    console.error('Cancel error:', err.message);
-    res.status(500).json({ error: err.message });
+    console.error('[CANCEL] FATAL ERROR:', err.message, err.stack);
+    res.status(500).json({ error: 'Server error: ' + err.message });
   }
 });
 
@@ -1997,12 +2099,12 @@ async function loadProviderMaps() {
     console.log('✅ Provider maps loaded');
   } catch (err) { console.error('Provider maps error:', err.message); }
 }
+
 // ====================================================================
 // ====== CATCH-ALL - ABSOLUTELY LAST MIDDLEWARE ======
 // ====================================================================
 
 app.use(function(req, res, next) {
-  console.log('[CATCH-ALL] Method:', req.method, 'Path:', req.path);  // ADD THIS
   if (req.path.startsWith('/api')) {
     return res.status(404).json({ error: 'API route not found' });
   }
@@ -2016,8 +2118,6 @@ app.use(function(req, res, next) {
 // ====== START SERVER - ABSOLUTELY LAST LINE OF FILE ======
 // ====================================================================
 
-// NOTE: If you set PORT in .env file, use: process.env.PORT
-// If not set, defaults to 3000
 const PORT = process.env.PORT || 3000;
 
 var server = app.listen(PORT, function() {
